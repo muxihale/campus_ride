@@ -1,0 +1,62 @@
+name: Проверки проекта
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Код, сборка и миграции
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: campusride
+          POSTGRES_PASSWORD: campusride_ci
+          POSTGRES_DB: campusride
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U campusride -d campusride"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      DATABASE_URL: postgresql://campusride:campusride_ci@localhost:5432/campusride?schema=public
+      API_PORT: 3001
+      WEB_ORIGIN: http://localhost:5173
+      TURBO_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Установка зафиксированных зависимостей
+        run: bun install --frozen-lockfile
+      - name: Проверки и сборка
+        run: bun run check
+      - name: Применение миграций к PostgreSQL
+        run: bun run db:deploy
+      - name: Проверка ограничений БД с откатом тестовых данных
+        run: docker exec -i "${{ job.services.postgres.id }}" psql -v ON_ERROR_STOP=1 -U campusride -d campusride < scripts/check-database.sql
+      - name: Проверка готовности собранного API
+        run: |
+          bun run start:api > /tmp/campusride-api.log 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://localhost:3001/api/health/ready; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/campusride-api.log
+          exit 1

@@ -1,0 +1,315 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  PASSENGER
+  DRIVER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+}
+
+enum RideStatus {
+  DRAFT
+  PUBLISHED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+  CANCELLED
+  COMPLETED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum NotificationKind {
+  BOOKING_REQUEST
+  BOOKING_CONFIRMED
+  BOOKING_REJECTED
+  BOOKING_CANCELLED
+  RIDE_CANCELLED
+  RIDE_STARTED
+  RIDE_COMPLETED
+  PAYMENT_UPDATED
+  REVIEW_RECEIVED
+  SYSTEM
+}
+
+enum LocationKind {
+  CAMPUS
+  MEETING_POINT
+  TRANSIT_STOP
+}
+
+model User {
+  id              String               @id @default(uuid()) @db.Uuid
+  email           String               @unique
+  passwordHash    String
+  fullName        String
+  phone           String?
+  affiliation     String?
+  status          UserStatus           @default(ACTIVE)
+  createdAt       DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime             @updatedAt @db.Timestamptz(3)
+  roles           UserRole[]
+  sessions        Session[]
+  driverProfile   DriverProfile?
+  bookings        Booking[]
+  reviewsWritten  Review[]             @relation("ReviewAuthor")
+  reviewsReceived Review[]             @relation("ReviewRecipient")
+  notifications   Notification[]
+  activity        ActivityLog[]
+  rideEvents      RideStatusEvent[]
+  bookingEvents   BookingStatusEvent[]
+}
+
+model UserRole {
+  userId String @db.Uuid
+  role   Role
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, role])
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  tokenHash String   @unique
+  expiresAt DateTime @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model DriverProfile {
+  userId    String    @id @db.Uuid
+  bio       String?
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  vehicles  Vehicle[]
+  rides     Ride[]
+}
+
+model Vehicle {
+  id                 String        @id @default(uuid()) @db.Uuid
+  driverId           String        @db.Uuid
+  make               String
+  model              String
+  color              String
+  registrationNumber String        @unique
+  passengerSeats     Int
+  createdAt          DateTime      @default(now()) @db.Timestamptz(3)
+  driver             DriverProfile @relation(fields: [driverId], references: [userId], onDelete: Restrict)
+  rides              Ride[]
+
+  @@index([driverId])
+}
+
+model Campus {
+  id        String     @id @default(uuid()) @db.Uuid
+  name      String     @unique
+  locations Location[]
+}
+
+// Жилые районы и микрорайоны; не только административные районы города.
+model District {
+  id        String     @id @default(uuid()) @db.Uuid
+  name      String     @unique
+  locations Location[]
+}
+
+model Location {
+  id         String       @id @default(uuid()) @db.Uuid
+  name       String
+  address    String
+  kind       LocationKind @default(MEETING_POINT)
+  districtId String       @db.Uuid
+  campusId   String?      @db.Uuid
+  district   District     @relation(fields: [districtId], references: [id], onDelete: Restrict)
+  campus     Campus?      @relation(fields: [campusId], references: [id], onDelete: Restrict)
+  ridesFrom  Ride[]       @relation("RideOrigin")
+  ridesTo    Ride[]       @relation("RideDestination")
+  stops      RideStop[]
+
+  @@index([districtId])
+  @@index([campusId])
+}
+
+model Ride {
+  id                 String            @id @default(uuid()) @db.Uuid
+  driverId           String            @db.Uuid
+  vehicleId          String            @db.Uuid
+  originId           String            @db.Uuid
+  destinationId      String            @db.Uuid
+  departureAt        DateTime          @db.Timestamptz(3)
+  seatsTotal         Int
+  priceKopecks       Int
+  musicAllowed       Boolean           @default(true)
+  luggageAllowed     Boolean           @default(false)
+  smokingAllowed     Boolean           @default(false)
+  conditions         String?
+  status             RideStatus        @default(DRAFT)
+  startedAt          DateTime?         @db.Timestamptz(3)
+  completedAt        DateTime?         @db.Timestamptz(3)
+  cancellationReason String?
+  createdAt          DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime          @updatedAt @db.Timestamptz(3)
+  driver             DriverProfile     @relation(fields: [driverId], references: [userId], onDelete: Restrict)
+  vehicle            Vehicle           @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  origin             Location          @relation("RideOrigin", fields: [originId], references: [id], onDelete: Restrict)
+  destination        Location          @relation("RideDestination", fields: [destinationId], references: [id], onDelete: Restrict)
+  stops              RideStop[]
+  bookings           Booking[]
+  statusEvents       RideStatusEvent[]
+
+  @@index([status, departureAt, priceKopecks])
+  @@index([originId, destinationId, departureAt])
+  @@index([driverId, status, departureAt])
+}
+
+model RideStop {
+  id         String   @id @default(uuid()) @db.Uuid
+  rideId     String   @db.Uuid
+  locationId String   @db.Uuid
+  position   Int
+  ride       Ride     @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  @@unique([rideId, position])
+}
+
+model Booking {
+  id                 String               @id @default(uuid()) @db.Uuid
+  rideId             String               @db.Uuid
+  passengerId        String               @db.Uuid
+  requestKey         String               @unique @db.Uuid
+  seats              Int
+  unitPriceKopecks   Int
+  status             BookingStatus        @default(PENDING)
+  cancellationReason String?
+  createdAt          DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime             @updatedAt @db.Timestamptz(3)
+  ride               Ride                 @relation(fields: [rideId], references: [id], onDelete: Restrict)
+  passenger          User                 @relation(fields: [passengerId], references: [id], onDelete: Restrict)
+  payment            Payment?
+  reviews            Review[]
+  statusEvents       BookingStatusEvent[]
+
+  // Уникальность активного бронирования задаётся частичным SQL-индексом в миграции.
+  @@index([rideId, status])
+  @@index([passengerId, status, createdAt])
+}
+
+model Payment {
+  id            String        @id @default(uuid()) @db.Uuid
+  bookingId     String        @unique @db.Uuid
+  amountKopecks Int
+  status        PaymentStatus @default(PENDING)
+  isDemo        Boolean       @default(true)
+  paidAt        DateTime?     @db.Timestamptz(3)
+  refundedAt    DateTime?     @db.Timestamptz(3)
+  createdAt     DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime      @updatedAt @db.Timestamptz(3)
+  booking       Booking       @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+}
+
+model Review {
+  id           String    @id @default(uuid()) @db.Uuid
+  bookingId    String    @db.Uuid
+  authorId     String    @db.Uuid
+  recipientId  String    @db.Uuid
+  rating       Int
+  comment      String
+  hiddenAt     DateTime? @db.Timestamptz(3)
+  hiddenReason String?
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  booking      Booking   @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  author       User      @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  recipient    User      @relation("ReviewRecipient", fields: [recipientId], references: [id], onDelete: Restrict)
+
+  @@unique([bookingId, authorId])
+  @@index([recipientId, createdAt])
+}
+
+model Notification {
+  id           String           @id @default(uuid()) @db.Uuid
+  userId       String           @db.Uuid
+  kind         NotificationKind
+  title        String
+  body         String
+  link         String?
+  resourceType String?
+  resourceId   String?          @db.Uuid
+  readAt       DateTime?        @db.Timestamptz(3)
+  createdAt    DateTime         @default(now()) @db.Timestamptz(3)
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+}
+
+model ActivityLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  actorId      String?  @db.Uuid
+  action       String
+  resourceType String
+  resourceId   String   @db.Uuid
+  details      Json?
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  actor        User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([resourceType, resourceId])
+}
+
+model RideStatusEvent {
+  id         String      @id @default(uuid()) @db.Uuid
+  rideId     String      @db.Uuid
+  actorId    String?     @db.Uuid
+  fromStatus RideStatus?
+  toStatus   RideStatus
+  reason     String?
+  createdAt  DateTime    @default(now()) @db.Timestamptz(3)
+  ride       Ride        @relation(fields: [rideId], references: [id], onDelete: Restrict)
+  actor      User?       @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([rideId, createdAt])
+}
+
+model BookingStatusEvent {
+  id         String         @id @default(uuid()) @db.Uuid
+  bookingId  String         @db.Uuid
+  actorId    String?        @db.Uuid
+  fromStatus BookingStatus?
+  toStatus   BookingStatus
+  reason     String?
+  createdAt  DateTime       @default(now()) @db.Timestamptz(3)
+  booking    Booking        @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  actor      User?          @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([bookingId, createdAt])
+}

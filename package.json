@@ -1,0 +1,44 @@
+{
+  "name": "campusride",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "turbo dev --ui=stream",
+    "dev:web": "bun run --filter @campusride/web dev",
+    "dev:api": "bun run --filter @campusride/api dev",
+    "build": "turbo build",
+    "start:api": "bun run --filter @campusride/api start",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "bun run db:generate && bun run db:validate && bun run format:check && bun run lint && bun run typecheck && bun run test && bun run build",
+    "db:generate": "bun run --filter @campusride/api db:generate",
+    "db:validate": "bun run --filter @campusride/api db:validate",
+    "db:migrate": "bun run --filter @campusride/api db:migrate",
+    "db:deploy": "bun run --filter @campusride/api db:deploy",
+    "db:studio": "bun run --filter @campusride/api db:studio",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose stop db",
+    "docker:up": "docker compose up --build -d",
+    "docker:down": "docker compose down",
+    "db:test": "docker compose exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\"' < scripts/check-database.sql"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.10",
+    "prettier-plugin-tailwindcss": "^0.8.1",
+    "turbo": "^2.11.7",
+    "typescript": "~6.0.2"
+  },
+  "packageManager": "bun@1.4.0",
+  "engines": {
+    "bun": ">=1.4.0",
+    "node": ">=24.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "description": "Сервис совместных поездок в кампус УрФУ"
+}

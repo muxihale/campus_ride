@@ -1,0 +1,133 @@
+<mxfile host="app.diagrams.net" version="24.7.17">
+  <diagram id="campusride-er" name="CampusRide — 17 сущностей">
+    <mxGraphModel dx="1700" dy="1800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1800" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="User" value="&lt;div style=&quot;padding:12px;background:#e2e8f0&quot;&gt;&lt;b&gt;User&lt;/b&gt;&lt;br/&gt;Пользователь&lt;/div&gt;&lt;div style=&quot;padding:12px;line-height:1.65&quot;&gt;id &lt;font color=&quot;#64748b&quot;&gt;String PK&lt;/font&gt;&lt;br/&gt;email &lt;font color=&quot;#64748b&quot;&gt;String UK&lt;/font&gt;&lt;br/&gt;passwordHash &lt;font color=&quot;#64748b&quot;&gt;String &lt;/font&gt;&lt;br/&gt;fullName &lt;font color=&quot;#64748b&quot;&gt;String &lt;/font&gt;&lt;br/&gt;status &lt;font color=&quot;#64748b&quot;&gt;UserStatus &lt;/font&gt;&lt;br/&gt;createdAt &lt;font color=&quot;#64748b&quot;&gt;DateTime &lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=0;overflow=fill;strokeColor=#94a3b8;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="680" y="80" width="280" height="224" as="geometry" />
+        </mxCell>
+        <mxCell id="UserRole" value="&lt;div style=&quot;padding:12px;background:#e2e8f0&quot;&gt;&lt;b&gt;UserRole&lt;/b&gt;&lt;br/&gt;Роль пользователя&lt;/div&gt;&lt;div style=&quot;padding:12px;line-height:1.65&quot;&gt;userId &lt;font color=&quot;#64748b&quot;&gt;String PK,FK&lt;/font&gt;&lt;br/&gt;role &lt;font color=&quot;#64748b&quot;&gt;Role PK&lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=0;overflow=fill;strokeColor=#94a3b8;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="20" y="80" width="280" height="132" as="geometry" />
+        </mxCell>
+        <mxCell id="Session" value="&lt;div style=&quot;padding:12px;background:#e2e8f0&quot;&gt;&lt;b&gt;Session&lt;/b&gt;&lt;br/&gt;Сессия&lt;/div&gt;&lt;div style=&quot;padding:12px;line-height:1.65&quot;&gt;id &lt;font color=&quot;#64748b&quot;&gt;String PK&lt;/font&gt;&lt;br/&gt;userId &lt;font color=&quot;#64748b&quot;&gt;String FK&lt;/font&gt;&lt;br/&gt;tokenHash &lt;font color=&quot;#64748b&quot;&gt;String UK&lt;/font&gt;&lt;br/&gt;expiresAt &lt;font color=&quot;#64748b&quot;&gt;DateTime &lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=0;overflow=fill;strokeColor=#94a3b8;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="350" y="80" width="280" height="178" as="geometry" />
+        </mxCell>
+        <mxCell id="DriverProfile" value="&lt;div style=&quot;padding:12px;background:#e2e8f0&quot;&gt;&lt;b&gt;DriverProfile&lt;/b&gt;&lt;br/&gt;Профиль водителя&lt;/div&gt;&lt;div style=&quot;padding:12px;line-height:1.65&quot;&gt;userId &lt;font color=&quot;#64748b&quot;&gt;String PK,FK&lt;/font&gt;&lt;br/&gt;bio &lt;font color=&quot;#64748b&quot;&gt;String? &lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=0;overflow=fill;strokeColor=#94a3b8;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="1010" y="80" width="280" height="132" as="geometry" />
+        </mxCell>
+        <mxCell id="Vehicle" value="&lt;div style=&quot;padding:12px;background:#e2e8f0&quot;&gt;&lt;b&gt;Vehicle&lt;/b&gt;&lt;br/&gt;Автомобиль&lt;/div&gt;&lt;div style=&quot;padding:12px;line-height:1.65&quot;&gt;id &lt;font color=&quot;#64748b&quot;&gt;String PK&lt;/font&gt;&lt;br/&gt;driverId &lt;font color=&quot;#64748b&quot;&gt;String FK&lt;/font&gt;&lt;br/&gt;make &lt;font color=&quot;#64748b&quot;&gt;String &lt;/font&gt;&lt;br/&gt;model &lt;font color=&quot;#64748b&quot;&gt;String &lt;/font&gt;&lt;br/&gt;registrationNumber &lt;font color=&quot;#64748b&quot;&gt;String UK&lt;/font&gt;&lt;br/&gt;passengerSeats &lt;font color=&quot;#64748b&quot;&gt;Int &lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=0;overflow=fill;strokeColor=#94a3b8;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="80" width="280" height="224" as="geometry" />
+        </mxCell>
+        <mxCell id="Campus" value="&lt;div style=&quot;padding:12px;background:#e2e8f0&quot;&gt;&lt;b&gt;Campus&lt;/b&gt;&lt;br/&gt;Корпус УрФУ&lt;/div&gt;&lt;div style=&quot;padding:12px;line-height:1.65&quot;&gt;id &lt;font color=&quot;#64748b&quot;&gt;String PK&lt;/font&gt;&lt;br/&gt;name &lt;font color=&quot;#64748b&quot;&gt;String UK&lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=0;overflow=fill;strokeColor=#94a3b8;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="350" y="500" width="280" height="132" as="geometry" />
+        </mxCell>
+        <mxCell id="District" value="&lt;div style=&quot;padding:12px;background:#e2e8f0&quot;&gt;&lt;b&gt;District&lt;/b&gt;&lt;br/&gt;Район&lt;/div&gt;&lt;div style=&quot;padding:12px;line-height:1.65&quot;&gt;id &lt;font color=&quot;#64748b&quot;&gt;String PK&lt;/font&gt;&lt;br/&gt;name &lt;font color=&quot;#64748b&quot;&gt;String UK&lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=0;overflow=fill;strokeColor=#94a3b8;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="20" y="500" width="280" height="132" as="geometry" />
+        </mxCell>
+        <mxCell id="Location" value="&lt;div style=&quot;padding:12px;background:#e2e8f0&quot;&gt;&lt;b&gt;Location&lt;/b&gt;&lt;br/&gt;Точка маршрута&lt;/div&gt;&lt;div style=&quot;padding:12px;line-height:1.65&quot;&gt;id &lt;font color=&quot;#64748b&quot;&gt;String PK&lt;/font&gt;&lt;br/&gt;districtId &lt;font color=&quot;#64748b&quot;&gt;String FK&lt;/font&gt;&lt;br/&gt;campusId &lt;font color=&quot;#64748b&quot;&gt;String? FK&lt;/font&gt;&lt;br/&gt;name &lt;font color=&quot;#64748b&quot;&gt;String &lt;/font&gt;&lt;br/&gt;address &lt;font color=&quot;#64748b&quot;&gt;String &lt;/font&gt;&lt;br/&gt;kind &lt;font color=&quot;#64748b&quot;&gt;LocationKind &lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=0;overflow=fill;strokeColor=#94a3b8;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="680" y="500" width="280" height="224" as="geometry" />
+        </mxCell>
+        <mxCell id="Ride" value="&lt;div style=&quot;padding:12px;background:#e2e8f0&quot;&gt;&lt;b&gt;Ride&lt;/b&gt;&lt;br/&gt;Поездка&lt;/div&gt;&lt;div style=&quot;padding:12px;line-height:1.65&quot;&gt;id &lt;font color=&quot;#64748b&quot;&gt;String PK&lt;/font&gt;&lt;br/&gt;driverId &lt;font color=&quot;#64748b&quot;&gt;String FK&lt;/font&gt;&lt;br/&gt;vehicleId &lt;font color=&quot;#64748b&quot;&gt;String FK&lt;/font&gt;&lt;br/&gt;originId &lt;font color=&quot;#64748b&quot;&gt;String FK&lt;/font&gt;&lt;br/&gt;destinationId &lt;font color=&quot;#64748b&quot;&gt;String FK&lt;/font&gt;&lt;br/&gt;departureAt &lt;font color=&quot;#64748b&quot;&gt;DateTime &lt;/font&gt;&lt;br/&gt;seatsTotal &lt;font color=&quot;#64748b&quot;&gt;Int &lt;/font&gt;&lt;br/&gt;priceKopecks &lt;font color=&quot;#64748b&quot;&gt;Int &lt;/font&gt;&lt;br/&gt;status &lt;font color=&quot;#64748b&quot;&gt;RideStatus &lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=0;overflow=fill;strokeColor=#94a3b8;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="1010" y="500" width="280" height="293" as="geometry" />
+        </mxCell>
+        <mxCell id="RideStop" value="&lt;div style=&quot;padding:12px;background:#e2e8f0&quot;&gt;&lt;b&gt;RideStop&lt;/b&gt;&lt;br/&gt;Остановка&lt;/div&gt;&lt;div style=&quot;padding:12px;line-height:1.65&quot;&gt;id &lt;font color=&quot;#64748b&quot;&gt;String PK&lt;/font&gt;&lt;br/&gt;rideId &lt;font color=&quot;#64748b&quot;&gt;String FK&lt;/font&gt;&lt;br/&gt;locationId &lt;font color=&quot;#64748b&quot;&gt;String FK&lt;/font&gt;&lt;br/&gt;position &lt;font color=&quot;#64748b&quot;&gt;Int &lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=0;overflow=fill;strokeColor=#94a3b8;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="500" width="280" height="178" as="geometry" />
+        </mxCell>
+        <mxCell id="Booking" value="&lt;div style=&quot;padding:12px;background:#e2e8f0&quot;&gt;&lt;b&gt;Booking&lt;/b&gt;&lt;br/&gt;Бронирование&lt;/div&gt;&lt;div style=&quot;padding:12px;line-height:1.65&quot;&gt;id &lt;font color=&quot;#64748b&quot;&gt;String PK&lt;/font&gt;&lt;br/&gt;rideId &lt;font color=&quot;#64748b&quot;&gt;String FK&lt;/font&gt;&lt;br/&gt;passengerId &lt;font color=&quot;#64748b&quot;&gt;String FK&lt;/font&gt;&lt;br/&gt;requestKey &lt;font color=&quot;#64748b&quot;&gt;String UK&lt;/font&gt;&lt;br/&gt;seats &lt;font color=&quot;#64748b&quot;&gt;Int &lt;/font&gt;&lt;br/&gt;unitPriceKopecks &lt;font color=&quot;#64748b&quot;&gt;Int &lt;/font&gt;&lt;br/&gt;status &lt;font color=&quot;#64748b&quot;&gt;BookingStatus &lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=0;overflow=fill;strokeColor=#94a3b8;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="1010" y="1000" width="280" height="247" as="geometry" />
+        </mxCell>
+        <mxCell id="Payment" value="&lt;div style=&quot;padding:12px;background:#e2e8f0&quot;&gt;&lt;b&gt;Payment&lt;/b&gt;&lt;br/&gt;Демо-платёж&lt;/div&gt;&lt;div style=&quot;padding:12px;line-height:1.65&quot;&gt;id &lt;font color=&quot;#64748b&quot;&gt;String PK&lt;/font&gt;&lt;br/&gt;bookingId &lt;font color=&quot;#64748b&quot;&gt;String FK,UK&lt;/font&gt;&lt;br/&gt;amountKopecks &lt;font color=&quot;#64748b&quot;&gt;Int &lt;/font&gt;&lt;br/&gt;status &lt;font color=&quot;#64748b&quot;&gt;PaymentStatus &lt;/font&gt;&lt;br/&gt;isDemo &lt;font color=&quot;#64748b&quot;&gt;Boolean &lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=0;overflow=fill;strokeColor=#94a3b8;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="1000" width="280" height="201" as="geometry" />
+        </mxCell>
+        <mxCell id="Review" value="&lt;div style=&quot;padding:12px;background:#e2e8f0&quot;&gt;&lt;b&gt;Review&lt;/b&gt;&lt;br/&gt;Отзыв&lt;/div&gt;&lt;div style=&quot;padding:12px;line-height:1.65&quot;&gt;id &lt;font color=&quot;#64748b&quot;&gt;String PK&lt;/font&gt;&lt;br/&gt;bookingId &lt;font color=&quot;#64748b&quot;&gt;String FK&lt;/font&gt;&lt;br/&gt;authorId &lt;font color=&quot;#64748b&quot;&gt;String FK&lt;/font&gt;&lt;br/&gt;recipientId &lt;font color=&quot;#64748b&quot;&gt;String FK&lt;/font&gt;&lt;br/&gt;rating &lt;font color=&quot;#64748b&quot;&gt;Int &lt;/font&gt;&lt;br/&gt;comment &lt;font color=&quot;#64748b&quot;&gt;String &lt;/font&gt;&lt;br/&gt;hiddenAt &lt;font color=&quot;#64748b&quot;&gt;DateTime? &lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=0;overflow=fill;strokeColor=#94a3b8;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="680" y="1000" width="280" height="247" as="geometry" />
+        </mxCell>
+        <mxCell id="Notification" value="&lt;div style=&quot;padding:12px;background:#e2e8f0&quot;&gt;&lt;b&gt;Notification&lt;/b&gt;&lt;br/&gt;Уведомление&lt;/div&gt;&lt;div style=&quot;padding:12px;line-height:1.65&quot;&gt;id &lt;font color=&quot;#64748b&quot;&gt;String PK&lt;/font&gt;&lt;br/&gt;userId &lt;font color=&quot;#64748b&quot;&gt;String FK&lt;/font&gt;&lt;br/&gt;kind &lt;font color=&quot;#64748b&quot;&gt;NotificationKind &lt;/font&gt;&lt;br/&gt;title &lt;font color=&quot;#64748b&quot;&gt;String &lt;/font&gt;&lt;br/&gt;resourceType &lt;font color=&quot;#64748b&quot;&gt;String? &lt;/font&gt;&lt;br/&gt;resourceId &lt;font color=&quot;#64748b&quot;&gt;String? &lt;/font&gt;&lt;br/&gt;readAt &lt;font color=&quot;#64748b&quot;&gt;DateTime? &lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=0;overflow=fill;strokeColor=#94a3b8;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="350" y="1000" width="280" height="247" as="geometry" />
+        </mxCell>
+        <mxCell id="ActivityLog" value="&lt;div style=&quot;padding:12px;background:#e2e8f0&quot;&gt;&lt;b&gt;ActivityLog&lt;/b&gt;&lt;br/&gt;История действий&lt;/div&gt;&lt;div style=&quot;padding:12px;line-height:1.65&quot;&gt;id &lt;font color=&quot;#64748b&quot;&gt;String PK&lt;/font&gt;&lt;br/&gt;actorId &lt;font color=&quot;#64748b&quot;&gt;String? FK&lt;/font&gt;&lt;br/&gt;action &lt;font color=&quot;#64748b&quot;&gt;String &lt;/font&gt;&lt;br/&gt;resourceType &lt;font color=&quot;#64748b&quot;&gt;String &lt;/font&gt;&lt;br/&gt;resourceId &lt;font color=&quot;#64748b&quot;&gt;String &lt;/font&gt;&lt;br/&gt;createdAt &lt;font color=&quot;#64748b&quot;&gt;DateTime &lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=0;overflow=fill;strokeColor=#94a3b8;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="20" y="1000" width="280" height="224" as="geometry" />
+        </mxCell>
+        <mxCell id="RideStatusEvent" value="&lt;div style=&quot;padding:12px;background:#e2e8f0&quot;&gt;&lt;b&gt;RideStatusEvent&lt;/b&gt;&lt;br/&gt;Статус поездки&lt;/div&gt;&lt;div style=&quot;padding:12px;line-height:1.65&quot;&gt;id &lt;font color=&quot;#64748b&quot;&gt;String PK&lt;/font&gt;&lt;br/&gt;rideId &lt;font color=&quot;#64748b&quot;&gt;String FK&lt;/font&gt;&lt;br/&gt;actorId &lt;font color=&quot;#64748b&quot;&gt;String? FK&lt;/font&gt;&lt;br/&gt;fromStatus &lt;font color=&quot;#64748b&quot;&gt;RideStatus? &lt;/font&gt;&lt;br/&gt;toStatus &lt;font color=&quot;#64748b&quot;&gt;RideStatus &lt;/font&gt;&lt;br/&gt;createdAt &lt;font color=&quot;#64748b&quot;&gt;DateTime &lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=0;overflow=fill;strokeColor=#94a3b8;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="1010" y="1420" width="280" height="224" as="geometry" />
+        </mxCell>
+        <mxCell id="BookingStatusEvent" value="&lt;div style=&quot;padding:12px;background:#e2e8f0&quot;&gt;&lt;b&gt;BookingStatusEvent&lt;/b&gt;&lt;br/&gt;Статус бронирования&lt;/div&gt;&lt;div style=&quot;padding:12px;line-height:1.65&quot;&gt;id &lt;font color=&quot;#64748b&quot;&gt;String PK&lt;/font&gt;&lt;br/&gt;bookingId &lt;font color=&quot;#64748b&quot;&gt;String FK&lt;/font&gt;&lt;br/&gt;actorId &lt;font color=&quot;#64748b&quot;&gt;String? FK&lt;/font&gt;&lt;br/&gt;fromStatus &lt;font color=&quot;#64748b&quot;&gt;BookingStatus? &lt;/font&gt;&lt;br/&gt;toStatus &lt;font color=&quot;#64748b&quot;&gt;BookingStatus &lt;/font&gt;&lt;br/&gt;createdAt &lt;font color=&quot;#64748b&quot;&gt;DateTime &lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=0;overflow=fill;strokeColor=#94a3b8;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="1420" width="280" height="224" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-1" value="userId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="UserRole" target="User">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-2" value="userId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="Session" target="User">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-3" value="userId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="DriverProfile" target="User">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-4" value="driverId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="Vehicle" target="DriverProfile">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-5" value="districtId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="Location" target="District">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-6" value="campusId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="Location" target="Campus">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-7" value="driverId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="Ride" target="DriverProfile">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-8" value="vehicleId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="Ride" target="Vehicle">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-9" value="originId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="Ride" target="Location">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-10" value="destinationId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="Ride" target="Location">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-11" value="rideId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="RideStop" target="Ride">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-12" value="locationId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="RideStop" target="Location">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-13" value="rideId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="Booking" target="Ride">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-14" value="passengerId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="Booking" target="User">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-15" value="bookingId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="Payment" target="Booking">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-16" value="bookingId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="Review" target="Booking">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-17" value="authorId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="Review" target="User">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-18" value="recipientId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="Review" target="User">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-19" value="userId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="Notification" target="User">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-20" value="actorId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="ActivityLog" target="User">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-21" value="rideId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="RideStatusEvent" target="Ride">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-22" value="actorId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="RideStatusEvent" target="User">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-23" value="bookingId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="BookingStatusEvent" target="Booking">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fk-24" value="actorId" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#94a3b8;fontColor=#475569;fontSize=10;" edge="1" parent="1" source="BookingStatusEvent" target="User">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

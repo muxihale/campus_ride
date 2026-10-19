@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.turbo/
+coverage/
+bun.lock
+apps/api/src/generated/
+apps/api/prisma/migrations/
