@@ -23,7 +23,8 @@
     "db:down": "docker compose stop db",
     "docker:up": "docker compose up --build -d",
     "docker:down": "docker compose down",
-    "db:test": "docker compose exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\"' < scripts/check-database.sql"
+    "db:test": "docker compose exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\"' < scripts/check-database.sql",
+    "db:seed": "bun run --filter @campusride/api db:seed"
   },
   "devDependencies": {
     "prettier": "^3.9.10",

@@ -17,7 +17,8 @@
     "db:validate": "bun --bun prisma validate",
     "db:migrate": "bun --bun prisma migrate dev",
     "db:deploy": "bun --bun prisma migrate deploy",
-    "db:studio": "bun --bun prisma studio"
+    "db:studio": "bun --bun prisma studio",
+    "db:seed": "bun run db:generate && bun --bun prisma db seed"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",
