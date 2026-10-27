@@ -41,10 +41,10 @@ jobs:
           bun-version: 1.4.0
       - name: Установка зафиксированных зависимостей
         run: bun install --frozen-lockfile
-      - name: Проверки и сборка
-        run: bun run check
       - name: Применение миграций к PostgreSQL
         run: bun run db:deploy
+      - name: Проверки и сборка
+        run: bun run check
       - name: Проверка ограничений БД с откатом тестовых данных
         run: docker exec -i "${{ job.services.postgres.id }}" psql -v ON_ERROR_STOP=1 -U campusride -d campusride < scripts/check-database.sql
       - name: Проверка готовности собранного API
