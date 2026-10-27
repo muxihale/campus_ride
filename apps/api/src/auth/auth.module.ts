@@ -3,6 +3,7 @@ import { ThrottlerModule } from "@nestjs/throttler"
 import { PrismaModule } from "../prisma/prisma.module.js"
 import { AuthController } from "./auth.controller.js"
 import { AuthService } from "./auth.service.js"
+import { RolesGuard } from "./roles.guard.js"
 import { SessionGuard } from "./session.guard.js"
 import { TrustedOriginGuard } from "./trusted-origin.guard.js"
 
@@ -15,7 +16,7 @@ import { TrustedOriginGuard } from "./trusted-origin.guard.js"
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, SessionGuard, TrustedOriginGuard],
-  exports: [SessionGuard, AuthService],
+  providers: [AuthService, SessionGuard, RolesGuard, TrustedOriginGuard],
+  exports: [SessionGuard, RolesGuard, AuthService],
 })
 export class AuthModule {}
