@@ -11,7 +11,7 @@ import { TrustedOriginGuard } from "./trusted-origin.guard.js"
     PrismaModule,
     ThrottlerModule.forRoot({
       throttlers: [{ ttl: 60_000, limit: 10 }],
-      errorMessage: "Слишком много попыток регистрации. Повторите позже",
+      errorMessage: "Слишком много попыток авторизации. Повторите позже",
     }),
   ],
   controllers: [AuthController],

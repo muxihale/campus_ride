@@ -242,4 +242,135 @@ describe("Регистрация и сессии (HTTP + PostgreSQL)", () => {
       await prisma.user.count({ where: { email: { endsWith: `@${domain}` } } })
     ).toBe(0)
   })
+  function login(overrides: Record<string, unknown> = {}) {
+    return request(app.getHttpServer())
+      .post("/api/auth/login")
+      .set("Origin", "http://localhost:5173")
+      .send({ email: `student@${domain}`, password, ...overrides })
+  }
+
+  it("входит с нормализацией email, создаёт новую безопасную сессию и выходит только из неё", async () => {
+    const created = await register().expect(201)
+    const original = sessionCookie(created)
+    const start = Date.now()
+    const entered = await login({
+      email: ` STUDENT@${domain.toUpperCase()} `,
+    }).expect(200)
+    expect(entered.body).toEqual(created.body)
+    expect(entered.headers["cache-control"]).toBe("no-store")
+    const current = sessionCookie(entered)
+    expect(current.token).not.toBe(original.token)
+    expect(current.header).toContain("HttpOnly")
+    expect(current.header).toContain("SameSite=Lax")
+    expect(current.header).toContain("Max-Age=604800")
+    const stored = await prisma.session.findUniqueOrThrow({
+      where: { tokenHash: hashSessionToken(current.token) },
+    })
+    expect(stored.expiresAt.getTime()).toBeGreaterThanOrEqual(
+      start + SESSION_TTL_MS
+    )
+    expect(entered.text).not.toContain(current.token)
+    await request(app.getHttpServer())
+      .get("/api/auth/me")
+      .set("Cookie", current.cookie)
+      .expect(200, created.body)
+    const exited = await request(app.getHttpServer())
+      .post("/api/auth/logout")
+      .set("Origin", "http://localhost:5173")
+      .set("Cookie", current.cookie)
+      .expect(204)
+    expect(exited.text).toBe("")
+    expect(exited.headers["cache-control"]).toBe("no-store")
+    expect(sessionCookie(exited).header).toContain("Expires=Thu, 01 Jan 1970")
+    expect(
+      await prisma.session.findUnique({
+        where: { tokenHash: hashSessionToken(current.token) },
+      })
+    ).toBeNull()
+    await request(app.getHttpServer())
+      .get("/api/auth/me")
+      .set("Cookie", current.cookie)
+      .expect(401)
+    await request(app.getHttpServer())
+      .get("/api/auth/me")
+      .set("Cookie", original.cookie)
+      .expect(200)
+    await request(app.getHttpServer())
+      .post("/api/auth/logout")
+      .set("Origin", "http://localhost:5173")
+      .set("Cookie", current.cookie)
+      .expect(204)
+  })
+
+  it("одинаково отклоняет неверный пароль, неизвестный email и заблокированный аккаунт", async () => {
+    const created = await register().expect(201)
+    const wrong = await login({ password: password.trim() }).expect(401)
+    const unknown = await login({ email: `missing@${domain}` }).expect(401)
+    await prisma.user.update({
+      where: { id: created.body.id },
+      data: { status: "BLOCKED" },
+    })
+    const blocked = await login().expect(401)
+    expect(wrong.body).toEqual(unknown.body)
+    expect(blocked.body).toEqual(unknown.body)
+    for (const response of [wrong, unknown, blocked])
+      expect(response.headers["set-cookie"]).toBeUndefined()
+    expect(
+      await prisma.session.count({ where: { userId: created.body.id } })
+    ).toBe(1)
+  })
+
+  it.each([
+    { email: "bad" },
+    { password: "short" },
+    { password: "x".repeat(129) },
+    { roles: ["ADMIN"] },
+    { fullName: "Анна" },
+  ])("валидирует вход: %j", async (fields) => {
+    await login(fields).expect(400)
+  })
+
+  it.each(["login", "logout"])("защищает Origin маршрута %s", async (route) => {
+    for (const origin of [undefined, "https://evil.example", "null"]) {
+      const call = request(app.getHttpServer()).post(`/api/auth/${route}`)
+      if (origin) call.set("Origin", origin)
+      const result = await call
+        .send({ email: `student@${domain}`, password })
+        .expect(403)
+      expect(result.headers["set-cookie"]).toBeUndefined()
+    }
+  })
+
+  it("ограничивает вход независимо от регистрации и учитывает невалидные попытки", async () => {
+    await register().expect(201)
+    for (let attempt = 0; attempt < 10; attempt++)
+      await login({ password: "short" }).expect(400)
+    const response = await login().expect(429)
+    expect(Number(response.headers["retry-after"])).toBeGreaterThan(0)
+  })
+
+  it("очищает cookie без сессии и с истёкшей сессией, включая Secure в production", async () => {
+    const created = await register().expect(201)
+    const { cookie, token } = sessionCookie(created)
+    await prisma.session.update({
+      where: { tokenHash: hashSessionToken(token) },
+      data: { expiresAt: new Date(0) },
+    })
+    for (const value of [undefined, "campusride_session=invalid", cookie]) {
+      const call = request(app.getHttpServer())
+        .post("/api/auth/logout")
+        .set("Origin", "http://localhost:5173")
+      if (value) call.set("Cookie", value)
+      await call.expect(204)
+    }
+    app.get(ConfigService).set("NODE_ENV", "production")
+    const entered = await login().expect(200)
+    expect(sessionCookie(entered).header).toContain("Secure")
+    const exited = await request(app.getHttpServer())
+      .post("/api/auth/logout")
+      .set("Origin", "http://localhost:5173")
+      .set("Cookie", sessionCookie(entered).cookie)
+      .expect(204)
+    expect(sessionCookie(exited).header).toContain("Secure")
+  })
 })

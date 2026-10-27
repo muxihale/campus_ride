@@ -9,7 +9,7 @@ import {
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger"
 import { Role } from "../generated/prisma/enums.js"
 
-export class RegisterDto {
+export class LoginDto {
   @ApiProperty({
     type: String,
     example: "student@campusride.test",
@@ -32,7 +32,9 @@ export class RegisterDto {
   @IsString()
   @Length(10, 128, { message: "Пароль должен содержать от 10 до 128 символов" })
   password!: string
+}
 
+export class RegisterDto extends LoginDto {
   @ApiProperty({
     type: String,
     example: "Анна Соколова",

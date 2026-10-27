@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Header,
+  HttpCode,
   Inject,
   Post,
   Req,
@@ -28,7 +29,7 @@ import {
 } from "@nestjs/swagger"
 import type { Response } from "express"
 import { AuthService, SESSION_COOKIE, SESSION_TTL_MS } from "./auth.service.js"
-import { CurrentUserDto, RegisterDto } from "./auth.dto.js"
+import { CurrentUserDto, LoginDto, RegisterDto } from "./auth.dto.js"
 import { SessionGuard, type SessionRequest } from "./session.guard.js"
 import { TrustedOriginGuard } from "./trusted-origin.guard.js"
 
@@ -86,6 +87,79 @@ export class AuthController {
       expires: result.expiresAt,
     })
     return result.user
+  }
+
+  @Post("login")
+  @HttpCode(200)
+  @UseGuards(TrustedOriginGuard, ThrottlerGuard)
+  @Header("Cache-Control", "no-store")
+  @ApiOperation({ summary: "Войти по email и паролю, создать новую сессию" })
+  @ApiHeader({
+    name: "Origin",
+    required: true,
+    description: "Должен совпадать с WEB_ORIGIN",
+  })
+  @ApiBody({ type: LoginDto })
+  @ApiOkResponse({ type: CurrentUserDto })
+  @ApiBadRequestResponse({ description: "Неверные или лишние поля" })
+  @ApiUnauthorizedResponse({
+    description: "Неверный email или пароль, включая заблокированный аккаунт",
+  })
+  @ApiForbiddenResponse({ description: "Origin не разрешён или отсутствует" })
+  @ApiResponse({
+    status: 429,
+    description: "Не больше 10 попыток входа за 60 секунд с одного IP",
+  })
+  async login(
+    @Body(
+      new ValidationPipe({
+        expectedType: LoginDto,
+        transform: true,
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      })
+    )
+    input: LoginDto,
+    @Res({ passthrough: true }) response: Response
+  ): Promise<CurrentUserDto> {
+    const result = await this.auth.login(input)
+    response.cookie(SESSION_COOKIE, result.token, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: this.config.get<string>("NODE_ENV") === "production",
+      path: "/",
+      maxAge: SESSION_TTL_MS,
+      expires: result.expiresAt,
+    })
+    return result.user
+  }
+
+  @Post("logout")
+  @HttpCode(204)
+  @UseGuards(TrustedOriginGuard)
+  @Header("Cache-Control", "no-store")
+  @ApiCookieAuth(SESSION_COOKIE)
+  @ApiOperation({
+    summary: "Завершить текущую сессию; повторный выход также успешен",
+  })
+  @ApiHeader({
+    name: "Origin",
+    required: true,
+    description: "Должен совпадать с WEB_ORIGIN",
+  })
+  @ApiResponse({ status: 204, description: "Сессия удалена, cookie очищена" })
+  @ApiForbiddenResponse({ description: "Origin не разрешён или отсутствует" })
+  async logout(
+    @Req() request: SessionRequest,
+    @Res({ passthrough: true }) response: Response
+  ): Promise<void> {
+    await this.auth.logout(request.cookies?.[SESSION_COOKIE])
+    response.clearCookie(SESSION_COOKIE, {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      secure: this.config.get<string>("NODE_ENV") === "production",
+    })
   }
 
   @Get("me")

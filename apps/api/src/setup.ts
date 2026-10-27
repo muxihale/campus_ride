@@ -21,7 +21,7 @@ export function configureApp(app: INestApplication) {
   const config = new DocumentBuilder()
     .setTitle("CampusRide API")
     .setDescription(
-      "API учебного сервиса совместных поездок в УрФУ. Реализованы проверки состояния, регистрация пассажира и текущий пользователь."
+      "API учебного сервиса совместных поездок в УрФУ. Реализованы проверки состояния, регистрация пассажира, вход, выход и текущий пользователь."
     )
     .setVersion("0.1.0")
     .addCookieAuth(

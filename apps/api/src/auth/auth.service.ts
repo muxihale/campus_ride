@@ -7,13 +7,20 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from "@nestjs/common"
-import { hash } from "@node-rs/argon2"
+import { hash, verify } from "@node-rs/argon2"
 import { PrismaService } from "../prisma/prisma.service.js"
 import { Prisma } from "../generated/prisma/client.js"
-import type { CurrentUserDto, RegisterDto } from "./auth.dto.js"
+import type { CurrentUserDto, LoginDto, RegisterDto } from "./auth.dto.js"
 
 export const SESSION_COOKIE = "campusride_session"
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000
+
+const dummyPasswordHash = hash(randomBytes(32).toString("base64url"), {
+  memoryCost: 19456,
+  timeCost: 2,
+  parallelism: 1,
+  outputLen: 32,
+})
 
 const publicUserSelect = {
   id: true,
@@ -78,6 +85,51 @@ export class AuthService {
       // Не передаём исходную ошибку с параметрами записи в HTTP-логи.
       throw new InternalServerErrorException(
         "Не удалось создать аккаунт. Повторите попытку позже"
+      )
+    }
+  }
+
+  async login(input: LoginDto) {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { email: input.email },
+        select: { ...publicUserSelect, passwordHash: true, status: true },
+      })
+      // Для отсутствующего аккаунта тоже выполняем Argon2, не раскрывая наличие email.
+      const valid = await verify(
+        user?.passwordHash ?? (await dummyPasswordHash),
+        input.password
+      )
+      if (!user || !valid || user.status !== "ACTIVE") {
+        throw new UnauthorizedException("Неверный email или пароль")
+      }
+      const token = randomBytes(32).toString("base64url")
+      const expiresAt = new Date(Date.now() + SESSION_TTL_MS)
+      await this.prisma.session.create({
+        data: {
+          userId: user.id,
+          tokenHash: hashSessionToken(token),
+          expiresAt,
+        },
+      })
+      return { user: toCurrentUser(user), token, expiresAt }
+    } catch (error) {
+      if (error instanceof UnauthorizedException) throw error
+      throw new ServiceUnavailableException(
+        "Сервис авторизации временно недоступен"
+      )
+    }
+  }
+
+  async logout(token: unknown): Promise<void> {
+    if (typeof token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(token)) return
+    try {
+      await this.prisma.session.deleteMany({
+        where: { tokenHash: hashSessionToken(token) },
+      })
+    } catch {
+      throw new ServiceUnavailableException(
+        "Сервис авторизации временно недоступен"
       )
     }
   }
