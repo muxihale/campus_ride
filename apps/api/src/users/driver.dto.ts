@@ -31,6 +31,13 @@ const plateLetters: Record<string, string> = {
   Х: "X",
 }
 
+export function normalizeRegistrationNumber(value: string): string {
+  return value
+    .toUpperCase()
+    .replace(/\s/g, "")
+    .replace(/[АВЕКМНОРСТУХ]/g, (letter) => plateLetters[letter]!)
+}
+
 export class CreateVehicleDto {
   @ApiProperty({ type: String, example: "Kia", maxLength: 60 })
   @Transform(trim)
@@ -57,12 +64,7 @@ export class CreateVehicleDto {
       "Стандартный номер легкового автомобиля РФ; кириллица и латиница приводятся к единому виду",
   })
   @Transform(({ value }: { value: unknown }) =>
-    typeof value === "string"
-      ? value
-          .toUpperCase()
-          .replace(/\s/g, "")
-          .replace(/[АВЕКМНОРСТУХ]/g, (letter) => plateLetters[letter]!)
-      : value
+    typeof value === "string" ? normalizeRegistrationNumber(value) : value
   )
   @IsString()
   @Matches(/^[ABEKMHOPCTYX][0-9]{3}[ABEKMHOPCTYX]{2}[0-9]{2,3}$/, {
