@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { VehiclesScreen } from "./Vehicles"
 import { BecomeDriver } from "./BecomeDriver"
 import type { User } from "./auth"
 import { ProfileScreen, type Profile } from "./Profile"
@@ -22,7 +23,7 @@ const destinations = [
     label: "Кабинет водителя",
     role: "DRIVER",
     description:
-      "Здесь появятся автомобили, созданные поездки, заявки пассажиров и статистика.",
+      "Здесь появятся созданные поездки, заявки пассажиров и статистика. Автомобили уже доступны в меню.",
   },
   {
     path: "admin",
@@ -56,6 +57,9 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
         </p>
         {[
           ...available,
+          ...(user.roles.includes("DRIVER")
+            ? [{ path: "vehicles", label: "Мои автомобили" }]
+            : []),
           { path: "profile", label: "Мой профиль" },
           ...(user.roles.includes("PASSENGER") && !user.roles.includes("DRIVER")
             ? [{ path: "become-driver", label: "Стать водителем" }]
@@ -76,6 +80,8 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
       </nav>
       {current === "profile" ? (
         <ProfileScreen onSaved={onSaved} onExpired={onExpired} />
+      ) : current === "vehicles" && user.roles.includes("DRIVER") ? (
+        <VehiclesScreen onExpired={onExpired} />
       ) : current === "become-driver" && user.roles.includes("PASSENGER") ? (
         <BecomeDriver
           alreadyDriver={user.roles.includes("DRIVER")}
