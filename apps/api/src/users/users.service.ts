@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   Inject,
   Injectable,
   ServiceUnavailableException,
@@ -6,6 +7,7 @@ import {
 } from "@nestjs/common"
 import { Prisma } from "../generated/prisma/client.js"
 import { PrismaService } from "../prisma/prisma.service.js"
+import type { BecomeDriverDto } from "./driver.dto.js"
 import type { ProfileDto, UpdateProfileDto } from "./profile.dto.js"
 
 const profileSelect = {
@@ -20,6 +22,44 @@ const profileSelect = {
 @Injectable()
 export class UsersService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  async becomeDriver(
+    userId: string,
+    input: BecomeDriverDto
+  ): Promise<ProfileDto> {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        await tx.driverProfile.create({
+          data: {
+            userId,
+            bio: input.bio || null,
+            vehicles: { create: input.vehicle },
+          },
+        })
+        await tx.userRole.upsert({
+          where: { userId_role: { userId, role: "DRIVER" } },
+          update: {},
+          create: { userId, role: "DRIVER" },
+        })
+        const user = await tx.user.findUniqueOrThrow({
+          where: { id: userId },
+          select: profileSelect,
+        })
+        return { ...user, roles: user.roles.map(({ role }) => role) }
+      })
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      )
+        throw new ConflictException(
+          "Профиль водителя уже создан или госномер занят"
+        )
+      throw new ServiceUnavailableException(
+        "Не удалось подключить роль водителя. Повторите позже"
+      )
+    }
+  }
 
   async profile(userId: string, input?: UpdateProfileDto): Promise<ProfileDto> {
     try {

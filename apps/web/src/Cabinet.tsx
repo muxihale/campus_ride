@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { BecomeDriver } from "./BecomeDriver"
 import type { User } from "./auth"
 import { ProfileScreen, type Profile } from "./Profile"
 import { cn } from "@workspace/ui/lib/utils"
@@ -53,25 +54,34 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
         <p className="px-3 py-2 text-xs font-medium tracking-wide text-muted-foreground">
           ЛИЧНЫЙ КАБИНЕТ
         </p>
-        {[...available, { path: "profile", label: "Мой профиль" }].map(
-          (item) => (
-            <a
-              key={item.path}
-              href={`#/${item.path}`}
-              aria-current={current === item.path ? "page" : undefined}
-              className={cn(
-                "rounded-lg px-3 py-3 text-sm font-medium transition outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
-                current === item.path &&
-                  "bg-secondary text-secondary-foreground"
-              )}
-            >
-              {item.label}
-            </a>
-          )
-        )}
+        {[
+          ...available,
+          { path: "profile", label: "Мой профиль" },
+          ...(user.roles.includes("PASSENGER") && !user.roles.includes("DRIVER")
+            ? [{ path: "become-driver", label: "Стать водителем" }]
+            : []),
+        ].map((item) => (
+          <a
+            key={item.path}
+            href={`#/${item.path}`}
+            aria-current={current === item.path ? "page" : undefined}
+            className={cn(
+              "rounded-lg px-3 py-3 text-sm font-medium transition outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+              current === item.path && "bg-secondary text-secondary-foreground"
+            )}
+          >
+            {item.label}
+          </a>
+        ))}
       </nav>
       {current === "profile" ? (
         <ProfileScreen onSaved={onSaved} onExpired={onExpired} />
+      ) : current === "become-driver" && user.roles.includes("PASSENGER") ? (
+        <BecomeDriver
+          alreadyDriver={user.roles.includes("DRIVER")}
+          onSaved={onSaved}
+          onExpired={onExpired}
+        />
       ) : destination ? (
         <section className="rounded-2xl border bg-card p-6 sm:p-8">
           <p className="text-sm text-muted-foreground">CampusRide · УрФУ</p>

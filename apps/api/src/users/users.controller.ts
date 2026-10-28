@@ -5,6 +5,7 @@ import {
   Header,
   Inject,
   Patch,
+  Post,
   Req,
   UseGuards,
   ValidationPipe,
@@ -12,6 +13,8 @@ import {
 import {
   ApiBadRequestResponse,
   ApiBody,
+  ApiConflictResponse,
+  ApiCreatedResponse,
   ApiCookieAuth,
   ApiForbiddenResponse,
   ApiHeader,
@@ -25,6 +28,8 @@ import { SESSION_COOKIE } from "../auth/auth.service.js"
 import { SessionGuard, type SessionRequest } from "../auth/session.guard.js"
 import { TrustedOriginGuard } from "../auth/trusted-origin.guard.js"
 import { ProfileDto, UpdateProfileDto } from "./profile.dto.js"
+import { Roles } from "../auth/roles.decorator.js"
+import { BecomeDriverDto } from "./driver.dto.js"
 import { UsersService } from "./users.service.js"
 
 @ApiTags("Профиль")
@@ -44,6 +49,48 @@ export class UsersController {
   @ApiOkResponse({ type: ProfileDto })
   profile(@Req() request: SessionRequest): Promise<ProfileDto> {
     return this.users.profile(request.currentUser.id)
+  }
+
+  @Post("driver-profile")
+  @Roles("PASSENGER")
+  @UseGuards(TrustedOriginGuard)
+  @Header("Cache-Control", "no-store")
+  @ApiOperation({
+    summary: "Подключить роль водителя и добавить первый автомобиль",
+  })
+  @ApiHeader({
+    name: "Origin",
+    required: true,
+    description: "Должен совпадать с WEB_ORIGIN",
+  })
+  @ApiBody({ type: BecomeDriverDto })
+  @ApiCreatedResponse({
+    type: ProfileDto,
+    description:
+      "Обновлённый пользователь с ролью DRIVER; роль пассажира сохранена",
+  })
+  @ApiBadRequestResponse({
+    description: "Неверные или лишние поля, включая вложенный автомобиль",
+  })
+  @ApiForbiddenResponse({
+    description: "Нет роли пассажира или не разрешён Origin",
+  })
+  @ApiConflictResponse({
+    description: "Профиль водителя уже создан или госномер занят",
+  })
+  becomeDriver(
+    @Req() request: SessionRequest,
+    @Body(
+      new ValidationPipe({
+        expectedType: BecomeDriverDto,
+        transform: true,
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      })
+    )
+    input: BecomeDriverDto
+  ): Promise<ProfileDto> {
+    return this.users.becomeDriver(request.currentUser.id, input)
   }
 
   @Patch()
