@@ -15,11 +15,23 @@ export class ApiError extends Error {
   }
 }
 
-export async function authRequest<T>(path: string, body?: unknown): Promise<T> {
+export function authRequest<T>(path: string, body?: unknown): Promise<T> {
+  return apiRequest<T>(
+    `auth/${path}`,
+    body === undefined ? "GET" : "POST",
+    body
+  )
+}
+
+export async function apiRequest<T>(
+  path: string,
+  method = "GET",
+  body?: unknown
+): Promise<T> {
   let response: Response
   try {
-    response = await fetch(`/api/auth/${path}`, {
-      method: body === undefined ? "GET" : "POST",
+    response = await fetch(`/api/${path}`, {
+      method,
       credentials: "same-origin",
       ...(body === undefined
         ? {}
