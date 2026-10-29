@@ -14,6 +14,7 @@ import {
   vi,
 } from "vitest"
 import { AppModule } from "../src/app.module.js"
+import type { Prisma } from "../src/generated/prisma/client.js"
 import { PrismaService } from "../src/prisma/prisma.service.js"
 import { configureApp } from "../src/setup.js"
 
@@ -123,6 +124,13 @@ describe("Создание черновика поездки (HTTP + PostgreSQL)
   })
   afterEach(async () => {
     if (!prisma || !userId) return
+    await prisma.notification.deleteMany({
+      where: { userId: { in: [userId, otherId] } },
+    })
+    await prisma.vehicle.update({
+      where: { id: vehicleId },
+      data: { passengerSeats: 3 },
+    })
     await prisma.booking.deleteMany({
       where: { ride: { driverId: { in: [userId, otherId] } } },
     })
@@ -350,13 +358,13 @@ describe("Создание черновика поездки (HTTP + PostgreSQL)
     }
   })
 
-  it("публикует только реализованный POST в Swagger без будущего поиска и публикации", async () => {
+  it("публикует создание и публикацию в Swagger без будущего публичного поиска", async () => {
     const result = await request(app.getHttpServer())
       .get("/api/docs-json")
       .expect(200)
     expect(result.body.paths["/api/rides"].post).toBeDefined()
     expect(result.body.paths["/api/rides"].get).toBeUndefined()
-    expect(result.body.paths["/api/rides/{id}/publish"]).toBeUndefined()
+    expect(result.body.paths["/api/rides/{id}/publish"].post).toBeDefined()
   })
   function list(query: Record<string, unknown> = {}) {
     return request(app.getHttpServer())
@@ -644,5 +652,289 @@ describe("Создание черновика поездки (HTTP + PostgreSQL)
     await detail(own.body.id).expect(403)
     await patch(own.body.id, {}).expect(403)
     await remove(own.body.id).expect(403)
+  })
+  function publish(id: string, body?: unknown) {
+    const call = request(app.getHttpServer())
+      .post(`/api/rides/${id}/publish`)
+      .set("Cookie", cookie)
+      .set("Origin", "http://localhost:5173")
+    return body === undefined ? call : call.send(body as object)
+  }
+  async function noPublication(id: string) {
+    expect(
+      (await prisma.ride.findUniqueOrThrow({ where: { id } })).status
+    ).toBe("DRAFT")
+    expect(await prisma.rideStatusEvent.count({ where: { rideId: id } })).toBe(
+      0
+    )
+    expect(await prisma.notification.count({ where: { resourceId: id } })).toBe(
+      0
+    )
+  }
+
+  it("публикует поездку и атомарно создаёт событие статуса и уведомление водителю", async () => {
+    const own = await create(input({ stops: [{ locationId: stop1 }] })).expect(
+      201
+    )
+    const result = await publish(own.body.id)
+      .expect("Cache-Control", "no-store")
+      .expect(200)
+    expect(result.body).toMatchObject({
+      ...own.body,
+      status: "PUBLISHED",
+      updatedAt: expect.any(String),
+    })
+    const events = await prisma.rideStatusEvent.findMany({
+      where: { rideId: own.body.id },
+    })
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      actorId: userId,
+      fromStatus: "DRAFT",
+      toStatus: "PUBLISHED",
+    })
+    const notifications = await prisma.notification.findMany({
+      where: { resourceId: own.body.id },
+    })
+    expect(notifications).toHaveLength(1)
+    expect(notifications[0]).toMatchObject({
+      userId,
+      kind: "SYSTEM",
+      title: "Поездка опубликована",
+      resourceType: "ride",
+      resourceId: own.body.id,
+      readAt: null,
+      link: "#/driver",
+    })
+    await patch(own.body.id, { conditions: "Поздняя правка" }).expect(409)
+    await remove(own.body.id).expect(409)
+  })
+
+  it("повтор публикации не меняет время записи и не дублирует побочные действия", async () => {
+    const own = await create().expect(201)
+    const first = await publish(own.body.id, {}).expect(200)
+    await publish(own.body.id).expect(200, first.body)
+    await prisma.ride.update({
+      where: { id: own.body.id },
+      data: { departureAt: new Date(0) },
+    })
+    const current = await detail(own.body.id).expect(200)
+    await publish(own.body.id).expect(200, current.body)
+    expect(
+      await prisma.rideStatusEvent.count({ where: { rideId: own.body.id } })
+    ).toBe(1)
+    expect(
+      await prisma.notification.count({ where: { resourceId: own.body.id } })
+    ).toBe(1)
+  })
+
+  it("три параллельные публикации создают только одно событие и уведомление", async () => {
+    const own = await create().expect(201)
+    const results = await Promise.all([
+      publish(own.body.id),
+      publish(own.body.id),
+      publish(own.body.id),
+    ])
+    expect(results.map(({ status }) => status)).toEqual([200, 200, 200])
+    expect(results[1]!.body).toEqual(results[0]!.body)
+    expect(results[2]!.body).toEqual(results[0]!.body)
+    expect(
+      await prisma.rideStatusEvent.count({ where: { rideId: own.body.id } })
+    ).toBe(1)
+    expect(
+      await prisma.notification.count({ where: { resourceId: own.body.id } })
+    ).toBe(1)
+  })
+
+  it.each(["IN_PROGRESS", "COMPLETED", "CANCELLED"] as const)(
+    "запрещает публикацию статуса %s",
+    async (status) => {
+      const own = await create().expect(201)
+      await prisma.ride.update({ where: { id: own.body.id }, data: { status } })
+      await publish(own.body.id).expect(409)
+      expect(
+        await prisma.rideStatusEvent.count({ where: { rideId: own.body.id } })
+      ).toBe(0)
+      expect(
+        await prisma.notification.count({ where: { resourceId: own.body.id } })
+      ).toBe(0)
+    }
+  )
+
+  it("повторно проверяет истёкшее время, изменённую вместимость и заполненность условий", async () => {
+    const own = await create().expect(201)
+    await prisma.vehicle.update({
+      where: { id: vehicleId },
+      data: { passengerSeats: 2 },
+    })
+    await publish(own.body.id).expect(400)
+    await noPublication(own.body.id)
+    await prisma.vehicle.update({
+      where: { id: vehicleId },
+      data: { passengerSeats: 3 },
+    })
+    await prisma.ride.update({
+      where: { id: own.body.id },
+      data: { departureAt: new Date(0) },
+    })
+    await publish(own.body.id).expect(400)
+    await noPublication(own.body.id)
+    for (const conditions of [null, "   "]) {
+      await prisma.ride.update({
+        where: { id: own.body.id },
+        data: { departureAt: new Date(Date.now() + 86400000), conditions },
+      })
+      await publish(own.body.id).expect(400)
+      await noPublication(own.body.id)
+    }
+  })
+
+  it("повторно проверяет автомобиль и точки маршрута с остановками", async () => {
+    const own = await create().expect(201)
+    await prisma.ride.update({
+      where: { id: own.body.id },
+      data: { vehicleId: otherVehicleId },
+    })
+    await publish(own.body.id).expect(404)
+    await noPublication(own.body.id)
+    await prisma.ride.update({
+      where: { id: own.body.id },
+      data: { vehicleId },
+    })
+    await prisma.rideStop.create({
+      data: { rideId: own.body.id, locationId: originId, position: 1 },
+    })
+    await publish(own.body.id).expect(400)
+    await noPublication(own.body.id)
+  })
+
+  it("не публикует черновик с бронированиями", async () => {
+    const own = await create().expect(201)
+    await prisma.booking.create({
+      data: {
+        rideId: own.body.id,
+        passengerId: otherId,
+        requestKey: randomUUID(),
+        seats: 1,
+        unitPriceKopecks: 100,
+        status: "CANCELLED",
+      },
+    })
+    await publish(own.body.id).expect(409)
+    await noPublication(own.body.id)
+  })
+
+  it("ошибка уведомления откатывает реальную запись статуса и события, повтор после исправления успешен", async () => {
+    const own = await create().expect(201)
+    const real = prisma.$transaction.bind(prisma)
+    let attemptedNotification = false
+    const failingTransaction = ((
+      callback: (tx: Prisma.TransactionClient) => Promise<unknown>
+    ) =>
+      real(async (tx) => {
+        const failed = new Proxy(tx, {
+          get(target, key) {
+            if (key === "notification")
+              return {
+                ...target.notification,
+                create: async () => {
+                  attemptedNotification = true
+                  throw new Error("private database credentials")
+                },
+              }
+            return Reflect.get(target, key)
+          },
+        })
+        return callback(failed)
+      })) as typeof prisma.$transaction
+    const transaction = vi
+      .spyOn(prisma, "$transaction")
+      .mockImplementationOnce(failingTransaction)
+    try {
+      const result = await publish(own.body.id).expect(503)
+      expect(attemptedNotification).toBe(true)
+      expect(result.body.message).toBe(
+        "Не удалось опубликовать поездку. Повторите позже"
+      )
+      expect(result.text).not.toContain("private database credentials")
+      await noPublication(own.body.id)
+    } finally {
+      transaction.mockRestore()
+    }
+    await publish(own.body.id).expect(200)
+    expect(
+      await prisma.rideStatusEvent.count({ where: { rideId: own.body.id } })
+    ).toBe(1)
+    expect(
+      await prisma.notification.count({ where: { resourceId: own.body.id } })
+    ).toBe(1)
+  })
+
+  it("сериализует публикацию и редактирование одного черновика", async () => {
+    const own = await create().expect(201)
+    const [published, edited] = await Promise.all([
+      publish(own.body.id),
+      patch(own.body.id, { conditions: "Новые условия" }),
+    ])
+    expect(published.status).toBe(200)
+    expect([200, 409]).toContain(edited.status)
+    const current = await detail(own.body.id).expect(200)
+    expect(current.body.status).toBe("PUBLISHED")
+    expect(current.body.conditions).toBe(
+      edited.status === 200 ? "Новые условия" : own.body.conditions
+    )
+    expect(
+      await prisma.rideStatusEvent.count({ where: { rideId: own.body.id } })
+    ).toBe(1)
+  })
+
+  it.each([
+    { status: "PUBLISHED" },
+    { driverId: randomUUID() },
+    { seatsTotal: 1 },
+  ])("команда публикации не принимает поля: %j", async (body) => {
+    const own = await create().expect(201)
+    await publish(own.body.id, body).expect(400)
+    await noPublication(own.body.id)
+  })
+
+  it("защищает публикацию владельцем, ролью, сессией и Origin", async () => {
+    const own = await create().expect(201)
+    await request(app.getHttpServer())
+      .post(`/api/rides/${own.body.id}/publish`)
+      .set("Origin", "http://localhost:5173")
+      .expect(401)
+    for (const origin of [undefined, "https://evil.example"]) {
+      const call = request(app.getHttpServer())
+        .post(`/api/rides/${own.body.id}/publish`)
+        .set("Cookie", cookie)
+      if (origin) call.set("Origin", origin)
+      await call.expect(403)
+    }
+    const other = await prisma.ride.create({
+      data: {
+        driverId: otherId,
+        vehicleId: otherVehicleId,
+        originId,
+        destinationId,
+        departureAt: new Date(Date.now() + 86400000),
+        seatsTotal: 1,
+        priceKopecks: 0,
+        conditions: "У входа",
+      },
+    })
+    const foreign = await publish(other.id).expect(404)
+    const missing = await publish(randomUUID()).expect(404)
+    expect(foreign.body).toEqual(missing.body)
+    await publish("bad").expect(400)
+    await prisma.userRole.deleteMany({ where: { userId, role: "DRIVER" } })
+    await prisma.userRole.create({ data: { userId, role: "ADMIN" } })
+    await publish(own.body.id).expect(403)
+    await prisma.user.update({
+      where: { id: userId },
+      data: { status: "BLOCKED" },
+    })
+    await publish(own.body.id).expect(401)
+    await noPublication(own.body.id)
   })
 })

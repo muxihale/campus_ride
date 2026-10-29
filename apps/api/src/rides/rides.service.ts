@@ -6,9 +6,11 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common"
+import { plainToInstance } from "class-transformer"
+import { validate as validateDto } from "class-validator"
 import { Prisma } from "../generated/prisma/client.js"
 import { PrismaService } from "../prisma/prisma.service.js"
-import type { CreateRideDto, RideDto, UpdateRideDto } from "./ride.dto.js"
+import { CreateRideDto, type RideDto, type UpdateRideDto } from "./ride.dto.js"
 import type { RideListDto, RideQueryDto } from "./ride-query.dto.js"
 
 const rideSelect = {
@@ -192,6 +194,80 @@ export class RidesService {
     }
   }
 
+  async publish(userId: string, id: string): Promise<RideDto> {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const ride = await this.ownedForUpdate(tx, userId, id)
+        // Повтор команды возвращает текущее состояние, не повторяя побочные действия.
+        if (ride.status === "PUBLISHED") return serialize(ride)
+        if (ride.status !== "DRAFT")
+          throw new ConflictException("Опубликовать можно только черновик")
+        if (await tx.booking.count({ where: { rideId: id } }))
+          throw new ConflictException("У черновика есть бронирования")
+        const input = plainToInstance(CreateRideDto, {
+          vehicleId: ride.vehicleId,
+          originId: ride.originId,
+          destinationId: ride.destinationId,
+          departureAt: ride.departureAt.toISOString(),
+          seatsTotal: ride.seatsTotal,
+          priceKopecks: ride.priceKopecks,
+          musicAllowed: ride.musicAllowed,
+          luggageAllowed: ride.luggageAllowed,
+          smokingAllowed: ride.smokingAllowed,
+          conditions: ride.conditions,
+          stops: ride.stops.map(({ locationId }) => ({ locationId })),
+        })
+        if (
+          (
+            await validateDto(input, {
+              whitelist: true,
+              forbidNonWhitelisted: true,
+            })
+          ).length
+        )
+          throw new BadRequestException(
+            "Заполните все поля черновика перед публикацией"
+          )
+        // Вместимость читается после блокировки автомобиля; параллельное изменение ждёт завершения публикации.
+        const vehicle = await tx.$queryRaw<
+          { id: string }[]
+        >`SELECT "id" FROM "Vehicle" WHERE "id" = ${ride.vehicleId}::uuid AND "driverId" = ${userId}::uuid FOR SHARE`
+        if (!vehicle.length) throw new NotFoundException("Автомобиль не найден")
+        await this.validate(tx, userId, input)
+        const published = await tx.ride.update({
+          where: { id },
+          data: { status: "PUBLISHED" },
+          select: rideSelect,
+        })
+        await tx.rideStatusEvent.create({
+          data: {
+            rideId: id,
+            actorId: userId,
+            fromStatus: "DRAFT",
+            toStatus: "PUBLISHED",
+          },
+        })
+        await tx.notification.create({
+          data: {
+            userId,
+            kind: "SYSTEM",
+            title: "Поездка опубликована",
+            body: "Поездка опубликована. Посмотреть её можно в кабинете водителя.",
+            link: "#/driver",
+            resourceType: "ride",
+            resourceId: id,
+          },
+        })
+        return serialize(published)
+      })
+    } catch (error) {
+      return this.fail(
+        error,
+        "Не удалось опубликовать поездку. Повторите позже"
+      )
+    }
+  }
+
   async remove(userId: string, id: string): Promise<void> {
     try {
       await this.prisma.$transaction(async (tx) => {
@@ -213,19 +289,27 @@ export class RidesService {
     userId: string,
     id: string
   ): Promise<StoredRide> {
-    const rows = await tx.$queryRaw<
-      { id: string }[]
-    >`SELECT "id" FROM "Ride" WHERE "id" = ${id}::uuid AND "driverId" = ${userId}::uuid FOR UPDATE`
-    if (!rows.length) throw new NotFoundException("Поездка не найдена")
-    const ride = await tx.ride.findUniqueOrThrow({
-      where: { id },
-      select: rideSelect,
-    })
+    const ride = await this.ownedForUpdate(tx, userId, id)
     if (ride.status !== "DRAFT")
       throw new ConflictException("Изменять и удалять можно только черновик")
     if (await tx.booking.count({ where: { rideId: id } }))
       throw new ConflictException("У черновика есть бронирования")
     return ride
+  }
+
+  private async ownedForUpdate(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    id: string
+  ): Promise<StoredRide> {
+    const rows = await tx.$queryRaw<
+      { id: string }[]
+    >`SELECT "id" FROM "Ride" WHERE "id" = ${id}::uuid AND "driverId" = ${userId}::uuid FOR UPDATE`
+    if (!rows.length) throw new NotFoundException("Поездка не найдена")
+    return tx.ride.findUniqueOrThrow({
+      where: { id },
+      select: rideSelect,
+    })
   }
 
   private stops(input: CreateRideDto["stops"]) {

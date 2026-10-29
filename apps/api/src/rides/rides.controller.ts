@@ -33,7 +33,12 @@ import { SESSION_COOKIE } from "../auth/auth.service.js"
 import { Roles } from "../auth/roles.decorator.js"
 import type { SessionRequest } from "../auth/session.guard.js"
 import { TrustedOriginGuard } from "../auth/trusted-origin.guard.js"
-import { CreateRideDto, RideDto, UpdateRideDto } from "./ride.dto.js"
+import {
+  CreateRideDto,
+  RideDto,
+  UpdateRideDto,
+  PublishRideDto,
+} from "./ride.dto.js"
 import { RidesService } from "./rides.service.js"
 
 @ApiTags("Поездки")
@@ -127,6 +132,55 @@ export class RidesController {
     input: UpdateRideDto
   ): Promise<RideDto> {
     return this.rides.update(request.currentUser.id, id, input)
+  }
+
+  @Post(":id/publish")
+  @HttpCode(200)
+  @UseGuards(TrustedOriginGuard)
+  @Header("Cache-Control", "no-store")
+  @ApiOperation({
+    summary: "Опубликовать собственный черновик",
+    description:
+      "DRAFT → PUBLISHED с повторной проверкой всех условий. Повтор PUBLISHED возвращает текущее состояние без повторных события и уведомления.",
+  })
+  @ApiHeader({
+    name: "Origin",
+    required: true,
+    description: "Должен совпадать с WEB_ORIGIN",
+  })
+  @ApiBody({ type: PublishRideDto, required: false })
+  @ApiOkResponse({ type: RideDto })
+  @ApiBadRequestResponse({
+    description:
+      "Неверный UUID, лишние поля или не выполнены условия публикации",
+  })
+  @ApiUnauthorizedResponse({
+    description: "Нет действующей сессии или аккаунт заблокирован",
+  })
+  @ApiForbiddenResponse({
+    description: "Нет роли DRIVER или не разрешён Origin",
+  })
+  @ApiNotFoundResponse({
+    description: "Поездка или свой автомобиль не найдены",
+  })
+  @ApiConflictResponse({
+    description: "Недопустимый статус или бронирования у черновика",
+  })
+  @ApiResponse({ status: 503, description: "Публикация временно недоступна" })
+  publish(
+    @Req() request: SessionRequest,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Body(
+      new ValidationPipe({
+        expectedType: PublishRideDto,
+        transform: true,
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      })
+    )
+    _input: PublishRideDto
+  ): Promise<RideDto> {
+    return this.rides.publish(request.currentUser.id, id)
   }
 
   @Delete(":id")

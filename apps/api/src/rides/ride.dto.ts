@@ -162,3 +162,6 @@ export class UpdateRideDto extends PartialType(
   @Type(() => RideStopInputDto)
   stops?: RideStopInputDto[]
 }
+
+// Команда публикации не принимает произвольные поля состояния.
+export class PublishRideDto {}
