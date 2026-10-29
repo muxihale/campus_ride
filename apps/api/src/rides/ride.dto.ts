@@ -12,8 +12,14 @@ import {
   Max,
   Min,
   ValidateNested,
+  ValidateIf,
 } from "class-validator"
-import { ApiProperty, OmitType } from "@nestjs/swagger"
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+  OmitType,
+  PartialType,
+} from "@nestjs/swagger"
 import { RideStatus } from "../generated/prisma/enums.js"
 
 export class RideStopInputDto {
@@ -124,4 +130,35 @@ export class RideDto extends OmitType(CreateRideDto, ["stops"] as const) {
   createdAt!: string
   @ApiProperty({ type: String, format: "date-time" })
   updatedAt!: string
+}
+
+// У частичного обновления нет значений по умолчанию: пропущенные настройки сохраняются.
+export class UpdateRideDto extends PartialType(
+  OmitType(CreateRideDto, [
+    "musicAllowed",
+    "luggageAllowed",
+    "smokingAllowed",
+    "stops",
+  ] as const),
+  { skipNullProperties: false }
+) {
+  @ApiPropertyOptional({ type: Boolean })
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsBoolean()
+  musicAllowed?: boolean
+  @ApiPropertyOptional({ type: Boolean })
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsBoolean()
+  luggageAllowed?: boolean
+  @ApiPropertyOptional({ type: Boolean })
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsBoolean()
+  smokingAllowed?: boolean
+  @ApiPropertyOptional({ type: [RideStopInputDto], maxItems: 10 })
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => RideStopInputDto)
+  stops?: RideStopInputDto[]
 }

@@ -123,6 +123,12 @@ describe("Создание черновика поездки (HTTP + PostgreSQL)
   })
   afterEach(async () => {
     if (!prisma || !userId) return
+    await prisma.booking.deleteMany({
+      where: { ride: { driverId: { in: [userId, otherId] } } },
+    })
+    await prisma.rideStatusEvent.deleteMany({
+      where: { ride: { driverId: { in: [userId, otherId] } } },
+    })
     await prisma.ride.deleteMany({
       where: { driverId: { in: [userId, otherId] } },
     })
@@ -351,5 +357,292 @@ describe("Создание черновика поездки (HTTP + PostgreSQL)
     expect(result.body.paths["/api/rides"].post).toBeDefined()
     expect(result.body.paths["/api/rides"].get).toBeUndefined()
     expect(result.body.paths["/api/rides/{id}/publish"]).toBeUndefined()
+  })
+  function list(query: Record<string, unknown> = {}) {
+    return request(app.getHttpServer())
+      .get("/api/me/rides")
+      .set("Cookie", cookie)
+      .query(query)
+  }
+  function detail(id: string) {
+    return request(app.getHttpServer())
+      .get(`/api/me/rides/${id}`)
+      .set("Cookie", cookie)
+  }
+  function patch(id: string, input: unknown) {
+    return request(app.getHttpServer())
+      .patch(`/api/rides/${id}`)
+      .set("Cookie", cookie)
+      .set("Origin", "http://localhost:5173")
+      .send(input as object)
+  }
+  function remove(id: string) {
+    return request(app.getHttpServer())
+      .delete(`/api/rides/${id}`)
+      .set("Cookie", cookie)
+      .set("Origin", "http://localhost:5173")
+  }
+
+  it("получает свою поездку и список без утечки чужих черновиков", async () => {
+    await list()
+      .expect("Cache-Control", "no-store")
+      .expect(200, { items: [], total: 0, page: 1, pageSize: 20 })
+    const own = await create().expect(201)
+    const other = await prisma.ride.create({
+      data: {
+        driverId: otherId,
+        vehicleId: otherVehicleId,
+        originId,
+        destinationId,
+        departureAt: new Date(Date.now() + 86400000),
+        seatsTotal: 1,
+        priceKopecks: 0,
+      },
+    })
+    await detail(own.body.id)
+      .expect("Cache-Control", "no-store")
+      .expect(200, own.body)
+    expect((await list().expect(200)).body.items).toEqual([own.body])
+    const denied = await detail(other.id).expect(404)
+    const missing = await detail(randomUUID()).expect(404)
+    expect(denied.body).toEqual(missing.body)
+    await patch(other.id, { conditions: "Чужое изменение" }).expect(404)
+    await remove(other.id).expect(404)
+    expect(
+      (await prisma.ride.findUniqueOrThrow({ where: { id: other.id } }))
+        .conditions
+    ).toBeNull()
+  })
+
+  it("фильтрует свои поездки по статусу, автомобилю, точкам, цене, местам и времени", async () => {
+    const first = await create(
+      input({ conditions: "Утро, место для рюкзака" })
+    ).expect(201)
+    const laterAt = new Date(Date.now() + 172800000).toISOString()
+    const second = await create(
+      input({
+        departureAt: laterAt,
+        priceKopecks: 0,
+        seatsTotal: 1,
+        conditions: "Вечер",
+      })
+    ).expect(201)
+    await prisma.ride.update({
+      where: { id: second.body.id },
+      data: { status: "PUBLISHED" },
+    })
+    const found = await list({
+      q: "рюкЗАКА",
+      status: "DRAFT",
+      vehicleId,
+      originId,
+      destinationId,
+      maxPriceKopecks: 15000,
+      minSeats: 3,
+      departureFrom: first.body.departureAt,
+      departureTo: first.body.departureAt,
+    }).expect(200)
+    expect(found.body).toMatchObject({ total: 1, items: [first.body] })
+    expect(
+      (await list({ status: "PUBLISHED" }).expect(200)).body.items[0].id
+    ).toBe(second.body.id)
+    expect((await list({ q: "Kia" }).expect(200)).body.total).toBe(2)
+    expect((await list({ q: "Космонавтов" }).expect(200)).body.total).toBe(2)
+    expect((await list({ q: "Корпус УрФУ" }).expect(200)).body.total).toBe(2)
+    expect((await list({ maxPriceKopecks: 0 }).expect(200)).body.total).toBe(1)
+    expect((await list({ minSeats: 2 }).expect(200)).body.total).toBe(1)
+    expect(
+      (await list({ vehicleId: otherVehicleId }).expect(200)).body.total
+    ).toBe(0)
+    expect((await list({ originId: stop1 }).expect(200)).body.total).toBe(0)
+    const a = await list({ pageSize: 1 }).expect(200)
+    const b = await list({ pageSize: 1, page: 2 }).expect(200)
+    expect(a.body.items[0].id).toBe(first.body.id)
+    expect(b.body.items[0].id).toBe(second.body.id)
+    expect(a.body.total).toBe(2)
+    expect(
+      (await list({ sort: "departureDesc", pageSize: 1 }).expect(200)).body
+        .items[0].id
+    ).toBe(second.body.id)
+    expect((await list({ page: 10 }).expect(200)).body.items).toEqual([])
+  })
+
+  it("частично меняет черновик без сброса настроек и остановок; явно заменяет и очищает остановки", async () => {
+    const own = await create(
+      input({
+        musicAllowed: false,
+        luggageAllowed: true,
+        smokingAllowed: true,
+        stops: [{ locationId: stop1 }, { locationId: stop2 }],
+      })
+    ).expect(201)
+    const changed = await patch(own.body.id, {
+      conditions: "  Новые условия  ",
+      priceKopecks: 0,
+    })
+      .expect("Cache-Control", "no-store")
+      .expect(200)
+    expect(changed.body).toMatchObject({
+      conditions: "Новые условия",
+      priceKopecks: 0,
+      status: "DRAFT",
+      driverId: userId,
+      musicAllowed: false,
+      luggageAllowed: true,
+      smokingAllowed: true,
+      stops: own.body.stops,
+    })
+    const replaced = await patch(own.body.id, {
+      stops: [{ locationId: stop2 }],
+      luggageAllowed: false,
+    }).expect(200)
+    expect(replaced.body.stops).toEqual([
+      { id: expect.any(String), locationId: stop2, position: 1 },
+    ])
+    expect(replaced.body.luggageAllowed).toBe(false)
+    expect(
+      (await patch(own.body.id, { stops: [] }).expect(200)).body.stops
+    ).toEqual([])
+    expect(
+      await prisma.rideStop.count({ where: { rideId: own.body.id } })
+    ).toBe(0)
+  })
+
+  it("проверяет объединённые поля и сохраняет исходные данные при ошибке редактирования", async () => {
+    const own = await create(input({ stops: [{ locationId: stop1 }] })).expect(
+      201
+    )
+    for (const fields of [
+      { destinationId: originId },
+      { originId: stop1 },
+      { stops: [{ locationId: randomUUID() }] },
+      { vehicleId: otherVehicleId },
+      { seatsTotal: 4 },
+      { departureAt: "2020-01-01T08:00:00Z" },
+    ]) {
+      await patch(own.body.id, {
+        conditions: "Не должно сохраниться",
+        ...fields,
+      }).expect("vehicleId" in fields ? 404 : 400)
+      const current = await detail(own.body.id).expect(200)
+      expect(current.body).toEqual(own.body)
+    }
+  })
+
+  it.each([
+    { status: "PUBLISHED" },
+    { driverId: randomUUID() },
+    { seatsTotal: null },
+    { conditions: null },
+    { musicAllowed: null },
+    { stops: null },
+    { stops: [{ locationId: stop1, position: 7 }] },
+  ])("не принимает служебные и null-поля PATCH: %j", async (fields) => {
+    const own = await create().expect(201)
+    await patch(own.body.id, fields).expect(400)
+    await detail(own.body.id).expect(200, own.body)
+  })
+
+  it("последовательно объединяет параллельные изменения разных полей без потери данных", async () => {
+    const own = await create().expect(201)
+    const results = await Promise.all([
+      patch(own.body.id, { conditions: "Параллельное изменение" }),
+      patch(own.body.id, { priceKopecks: 0 }),
+    ])
+    expect(results.map(({ status }) => status)).toEqual([200, 200])
+    expect((await detail(own.body.id).expect(200)).body).toMatchObject({
+      conditions: "Параллельное изменение",
+      priceKopecks: 0,
+    })
+  })
+
+  it("удаляет свой черновик вместе с остановками и отвечает 404 при повторе", async () => {
+    const own = await create(input({ stops: [{ locationId: stop1 }] })).expect(
+      201
+    )
+    const result = await remove(own.body.id)
+      .expect("Cache-Control", "no-store")
+      .expect(204)
+    expect(result.text).toBe("")
+    await detail(own.body.id).expect(404)
+    await remove(own.body.id).expect(404)
+    expect(
+      await prisma.rideStop.count({ where: { rideId: own.body.id } })
+    ).toBe(0)
+  })
+
+  it.each(["PUBLISHED", "IN_PROGRESS", "COMPLETED", "CANCELLED"] as const)(
+    "не меняет и не удаляет поездку со статусом %s",
+    async (status) => {
+      const own = await create().expect(201)
+      await prisma.ride.update({ where: { id: own.body.id }, data: { status } })
+      await patch(own.body.id, { conditions: "Изменение" }).expect(409)
+      await remove(own.body.id).expect(409)
+      expect((await detail(own.body.id).expect(200)).body.status).toBe(status)
+    }
+  )
+
+  it("не меняет и не удаляет черновик с бронированием любого статуса", async () => {
+    const own = await create().expect(201)
+    await prisma.booking.create({
+      data: {
+        rideId: own.body.id,
+        passengerId: otherId,
+        requestKey: randomUUID(),
+        seats: 1,
+        unitPriceKopecks: 100,
+        status: "CANCELLED",
+      },
+    })
+    await patch(own.body.id, { conditions: "Изменение" }).expect(409)
+    await remove(own.body.id).expect(409)
+    await detail(own.body.id).expect(200, own.body)
+  })
+
+  it.each([
+    { status: "WRONG" },
+    { vehicleId: "bad" },
+    { page: 0 },
+    { pageSize: 101 },
+    { minSeats: 0 },
+    { maxPriceKopecks: -1 },
+    { departureFrom: "2027-01-01T08:00:00" },
+    {
+      departureFrom: "2028-01-01T08:00:00Z",
+      departureTo: "2027-01-01T08:00:00Z",
+    },
+    { sort: "unknown" },
+    { driverId: randomUUID() },
+  ])("валидирует фильтры списка: %j", async (query) => {
+    await list(query).expect(400)
+  })
+
+  it("закрывает все новые маршруты сессией, ролью и проверяет Origin на мутациях", async () => {
+    const own = await create().expect(201)
+    for (const [method, path] of [
+      ["get", "/api/me/rides"],
+      ["get", `/api/me/rides/${own.body.id}`],
+      ["patch", `/api/rides/${own.body.id}`],
+      ["delete", `/api/rides/${own.body.id}`],
+    ] as const) {
+      await request(app.getHttpServer())
+        [method](path)
+        .set("Origin", "http://localhost:5173")
+        .expect(401)
+    }
+    for (const method of ["patch", "delete"] as const)
+      await request(app.getHttpServer())
+        [method](`/api/rides/${own.body.id}`)
+        .set("Cookie", cookie)
+        .set("Origin", "https://evil.example")
+        .expect(403)
+    await detail("bad").expect(400)
+    await patch("bad", {}).expect(400)
+    await remove("bad").expect(400)
+    await prisma.userRole.deleteMany({ where: { userId, role: "DRIVER" } })
+    await list().expect(403)
+    await detail(own.body.id).expect(403)
+    await patch(own.body.id, {}).expect(403)
+    await remove(own.body.id).expect(403)
   })
 })
