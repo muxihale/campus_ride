@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { RideEditor } from "./RideEditor"
 import { VehiclesScreen } from "./Vehicles"
 import { BecomeDriver } from "./BecomeDriver"
 import type { User } from "./auth"
@@ -58,7 +59,10 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
         {[
           ...available,
           ...(user.roles.includes("DRIVER")
-            ? [{ path: "vehicles", label: "Мои автомобили" }]
+            ? [
+                { path: "vehicles", label: "Мои автомобили" },
+                { path: "rides/new", label: "Создать поездку" },
+              ]
             : []),
           { path: "profile", label: "Мой профиль" },
           ...(user.roles.includes("PASSENGER") && !user.roles.includes("DRIVER")
@@ -82,6 +86,14 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
         <ProfileScreen onSaved={onSaved} onExpired={onExpired} />
       ) : current === "vehicles" && user.roles.includes("DRIVER") ? (
         <VehiclesScreen onExpired={onExpired} />
+      ) : user.roles.includes("DRIVER") &&
+        (current === "rides/new" ||
+          /^rides\/[a-f0-9-]+\/edit$/i.test(current)) ? (
+        <RideEditor
+          key={current}
+          rideId={current === "rides/new" ? undefined : current.split("/")[1]}
+          onExpired={onExpired}
+        />
       ) : current === "become-driver" && user.roles.includes("PASSENGER") ? (
         <BecomeDriver
           alreadyDriver={user.roles.includes("DRIVER")}
