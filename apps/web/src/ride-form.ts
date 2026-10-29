@@ -11,13 +11,18 @@ export function ekaterinburgInput(value: string | Date): string {
   const part = (type: string) => parts.find((item) => item.type === type)!.value
   return `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}`
 }
-export function departureFromInput(value: string): string {
+export function ekaterinburgISO(value: string): string {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value))
     throw new Error("Укажите дату и время отправления")
   const iso = `${value}:00+05:00`
   const date = new Date(iso)
   if (!Number.isFinite(date.getTime()) || ekaterinburgInput(date) !== value)
     throw new Error("Укажите корректную дату и время")
+  return iso
+}
+export function departureFromInput(value: string): string {
+  const iso = ekaterinburgISO(value)
+  const date = new Date(iso)
   if (date.getTime() <= Date.now())
     throw new Error("Отправление должно быть в будущем")
   return iso

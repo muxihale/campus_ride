@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { RidesScreen } from "./Rides"
 import { RideEditor } from "./RideEditor"
 import { VehiclesScreen } from "./Vehicles"
 import { BecomeDriver } from "./BecomeDriver"
@@ -24,7 +25,7 @@ const destinations = [
     label: "Кабинет водителя",
     role: "DRIVER",
     description:
-      "Здесь появятся созданные поездки, заявки пассажиров и статистика. Автомобили уже доступны в меню.",
+      "Создавайте и публикуйте поездки. Автомобили и профиль доступны в меню.",
   },
   {
     path: "admin",
@@ -60,6 +61,7 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
           ...available,
           ...(user.roles.includes("DRIVER")
             ? [
+                { path: "rides", label: "Мои поездки" },
                 { path: "vehicles", label: "Мои автомобили" },
                 { path: "rides/new", label: "Создать поездку" },
               ]
@@ -86,6 +88,8 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
         <ProfileScreen onSaved={onSaved} onExpired={onExpired} />
       ) : current === "vehicles" && user.roles.includes("DRIVER") ? (
         <VehiclesScreen onExpired={onExpired} />
+      ) : current === "rides" && user.roles.includes("DRIVER") ? (
+        <RidesScreen onExpired={onExpired} />
       ) : user.roles.includes("DRIVER") &&
         (current === "rides/new" ||
           /^rides\/[a-f0-9-]+\/edit$/i.test(current)) ? (
@@ -107,18 +111,38 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
           <p className="mt-5 max-w-xl leading-relaxed text-muted-foreground">
             {destination.description}
           </p>
-          <div className="mt-6 rounded-xl border border-dashed p-5">
-            <p className="text-sm font-medium">Раздел в разработке</p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Уже сейчас вы можете заполнить контактные данные в профиле.
-            </p>
-            <a
-              className="mt-4 inline-block text-sm font-medium underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-ring"
-              href="#/profile"
-            >
-              Заполнить профиль
-            </a>
-          </div>
+          {destination.path === "driver" ? (
+            <div className="mt-6 space-y-4 rounded-xl border p-5">
+              <a
+                href="#/rides"
+                className="block text-sm font-medium underline underline-offset-4"
+              >
+                Открыть мои поездки
+              </a>
+              <a
+                href="#/rides/new"
+                className="block text-sm font-medium underline underline-offset-4"
+              >
+                Новая поездка
+              </a>
+              <p className="text-sm text-muted-foreground">
+                Заявки пассажиров и статистика появятся позже.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-6 rounded-xl border border-dashed p-5">
+              <p className="text-sm font-medium">Раздел в разработке</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Уже сейчас вы можете заполнить контактные данные в профиле.
+              </p>
+              <a
+                className="mt-4 inline-block text-sm font-medium underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-ring"
+                href="#/profile"
+              >
+                Заполнить профиль
+              </a>
+            </div>
+          )}
         </section>
       ) : (
         <section className="rounded-2xl border p-6">

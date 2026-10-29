@@ -75,7 +75,9 @@ describe("Кабинеты и профиль", () => {
     expect(
       await screen.findByRole("heading", { name: "Кабинет водителя" })
     ).toBeTruthy()
-    expect(screen.getByText("Раздел в разработке")).toBeTruthy()
+    expect(
+      screen.getByText("Заявки пассажиров и статистика появятся позже.")
+    ).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 

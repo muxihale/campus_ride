@@ -8,51 +8,16 @@ import {
   rublesToKopecks,
 } from "./ride-form"
 
-type Location = { id: string; name: string; address: string }
-type Vehicle = {
-  id: string
-  make: string
-  model: string
-  registrationNumber: string
-  passengerSeats: number
-}
-type Ride = {
-  id: string
-  status: string
-  vehicleId: string
-  originId: string
-  destinationId: string
-  departureAt: string
-  seatsTotal: number
-  priceKopecks: number
-  conditions: string
-  musicAllowed: boolean
-  luggageAllowed: boolean
-  smokingAllowed: boolean
-  stops: { locationId: string }[]
-}
-type Page<T> = { items: T[]; total: number; page: number; pageSize: number }
+import {
+  allPages,
+  rideStatusNames,
+  type RideLocation as Location,
+  type RideVehicle as Vehicle,
+  type Ride,
+} from "./ride-data"
 type Data = { locations: Location[]; vehicles: Vehicle[]; ride: Ride | null }
-const statusNames: Record<string, string> = {
-  PUBLISHED: "Опубликована",
-  IN_PROGRESS: "В пути",
-  COMPLETED: "Завершена",
-  CANCELLED: "Отменена",
-}
 const inputClass =
   "mt-2 h-11 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-base outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50"
-
-async function allPages<T>(path: string): Promise<T[]> {
-  const items: T[] = []
-  for (let page = 1; ; page++) {
-    const result = await apiRequest<Page<T>>(
-      `${path}?pageSize=100&page=${page}`
-    )
-    items.push(...result.items)
-    if (page * result.pageSize >= result.total || result.items.length === 0)
-      return items
-  }
-}
 
 export function RideEditor({
   rideId,
@@ -119,7 +84,7 @@ export function RideEditor({
       ) : data.ride && data.ride.status !== "DRAFT" ? (
         <p role="alert" className="mt-5 text-sm">
           Редактировать можно только черновик. Текущий статус:{" "}
-          {statusNames[data.ride.status] ?? data.ride.status}.
+          {rideStatusNames[data.ride.status] ?? data.ride.status}.
         </p>
       ) : !data.vehicles.length ? (
         <div className="mt-5">
@@ -260,7 +225,8 @@ function RideForm({ data, onExpired }: { data: Data; onExpired: () => void }) {
           Черновик сохранён
         </h2>
         <p className="text-sm text-muted-foreground">
-          Поездка ещё не опубликована. Публикация появится отдельным этапом.
+          Поездка ещё не опубликована. Проверьте её в списке своих поездок перед
+          публикацией.
         </p>
         <p className="text-sm">
           Отправление: {ekaterinburgInput(saved.departureAt).replace("T", " ")}{" "}
@@ -282,6 +248,12 @@ function RideForm({ data, onExpired }: { data: Data; onExpired: () => void }) {
           }{" "}
           · Мест: {saved.seatsTotal}
         </p>
+        <a
+          href="#/rides"
+          className="mr-5 inline-block text-sm font-medium underline underline-offset-4"
+        >
+          Открыть мои поездки
+        </a>
         {original ? (
           <Button onClick={() => setSaved(null)}>
             Продолжить редактирование
