@@ -3,6 +3,7 @@ import { CarFront, LoaderCircle, MapPin } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { ApiError, authRequest, type User } from "./auth"
 
+import { SearchScreen } from "./Search"
 import { Cabinet } from "./Cabinet"
 import type { Profile } from "./Profile"
 
@@ -16,6 +17,13 @@ const inputClass =
   "mt-2 h-11 w-full rounded-lg border border-input bg-background px-3 text-base outline-none transition focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50"
 
 export function App() {
+  const [hash, setHash] = useState(() => window.location.hash)
+  useEffect(() => {
+    const changed = () => setHash(window.location.hash)
+    window.addEventListener("hashchange", changed)
+    return () => window.removeEventListener("hashchange", changed)
+  }, [])
+  const searching = hash === "#/search" || hash.startsWith("#/search?")
   const [user, setUser] = useState<User | null>(null)
   const [restoring, setRestoring] = useState(true)
   const [sessionError, setSessionError] = useState("")
@@ -131,12 +139,36 @@ export function App() {
           </span>
         )}
       </header>
+      <nav
+        aria-label="Основная навигация"
+        className="flex flex-wrap gap-5 border-b py-3 text-sm font-medium"
+      >
+        <a
+          href="#/search"
+          aria-current={searching ? "page" : undefined}
+          className="underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          Найти поездку
+        </a>
+        {searching && (
+          <a
+            href={user ? "#/profile" : "#"}
+            className="underline underline-offset-4"
+          >
+            {user ? "Личный кабинет" : "Войти"}
+          </a>
+        )}
+      </nav>
       {user && error && (
         <p role="alert" className="mt-4 text-sm text-destructive">
           {error}
         </p>
       )}
-      {user ? (
+      {searching ? (
+        <main className="flex-1 py-8 sm:py-12">
+          <SearchScreen key={hash} query={hash.split("?").slice(1).join("?")} />
+        </main>
+      ) : user ? (
         <main className="flex-1">
           <Cabinet
             user={user}
@@ -159,7 +191,8 @@ export function App() {
               попутчиками и добирайтесь до кампуса вместе.
             </p>
             <p className="mt-4 text-sm text-muted-foreground">
-              Поиск поездок и бронирование появятся на следующих этапах проекта.
+              Выберите «Найти поездку» в меню. Бронирование появится в следующих
+              обновлениях.
             </p>
           </section>
           <section
