@@ -3,7 +3,15 @@ import { randomInt, randomUUID } from "node:crypto"
 import type { INestApplication } from "@nestjs/common"
 import { Test } from "@nestjs/testing"
 import request from "supertest"
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest"
 import { AppModule } from "../src/app.module.js"
 import { PrismaService } from "../src/prisma/prisma.service.js"
 import { configureApp } from "../src/setup.js"
@@ -140,9 +148,14 @@ describe("Публичный поиск (HTTP + PostgreSQL)", () => {
       await add({ departureAt: new Date("2020-01-01T00:00:00Z") })
     }
   })
+  afterEach(async () => {
+    if (prisma)
+      await prisma.booking.deleteMany({ where: { rideId: { in: rides } } })
+  })
   afterAll(async () => {
     try {
       if (prisma) {
+        await prisma.booking.deleteMany({ where: { rideId: { in: rides } } })
         await prisma.ride.deleteMany({ where: { id: { in: rides } } })
         await prisma.vehicle.deleteMany({ where: { driverId: { in: users } } })
         await prisma.driverProfile.deleteMany({
@@ -271,11 +284,9 @@ describe("Публичный поиск (HTTP + PostgreSQL)", () => {
     await get(query).expect(400)
   })
   it("отвечает безопасным 503 при сбое поиска", async () => {
-    const find = vi
-      .spyOn(prisma.ride, "findMany")
-      .mockImplementationOnce(() => {
-        throw new Error("private database credentials")
-      })
+    const find = vi.spyOn(prisma, "$queryRaw").mockImplementationOnce(() => {
+      throw new Error("private database credentials")
+    })
     try {
       const result = await get().expect(503)
       expect(result.body.message).toBe("Поиск поездок временно недоступен")
@@ -283,5 +294,159 @@ describe("Публичный поиск (HTTP + PostgreSQL)", () => {
     } finally {
       find.mockRestore()
     }
+  })
+  async function book(
+    rideId: string,
+    status: "PENDING" | "CONFIRMED" | "CANCELLED" | "REJECTED" | "COMPLETED",
+    seats: number,
+    passengerId = users[1]!
+  ) {
+    return prisma.booking.create({
+      data: {
+        rideId,
+        passengerId,
+        requestKey: randomUUID(),
+        status,
+        seats,
+        unitPriceKopecks: 100,
+      },
+    })
+  }
+  async function remaining(id: string) {
+    const result = await get().expect(200)
+    return result.body.items.find((item: { id: string }) => item.id === id)
+      ?.availableSeats
+  }
+
+  it("без бронирований возвращает offered=available, не раскрывая заявки пассажиров", async () => {
+    const result = await get().expect(200)
+    for (const item of result.body.items) {
+      expect(item.availableSeats).toBe(item.seatsTotal)
+      expect(item).not.toHaveProperty("bookings")
+    }
+  })
+
+  it("суммирует места PENDING и CONFIRMED, а не число бронирований", async () => {
+    await book(toId, "PENDING", 1)
+    await book(toId, "CONFIRMED", 1, users[2]!)
+    expect(await remaining(toId)).toBe(1)
+    expect(
+      (await get({ minSeats: 2 }).expect(200)).body.items.some(
+        (item: { id: string }) => item.id === toId
+      )
+    ).toBe(false)
+    expect(
+      (await get({ minSeats: 1 }).expect(200)).body.items.some(
+        (item: { id: string }) => item.id === toId
+      )
+    ).toBe(true)
+  })
+
+  it("переход PENDING → CONFIRMED не занимает места повторно, отмена освобождает их", async () => {
+    const booking = await book(toId, "PENDING", 2)
+    expect(await remaining(toId)).toBe(1)
+    await prisma.booking.update({
+      where: { id: booking.id },
+      data: { status: "CONFIRMED" },
+    })
+    expect(await remaining(toId)).toBe(1)
+    await prisma.booking.update({
+      where: { id: booking.id },
+      data: { status: "CANCELLED" },
+    })
+    expect(await remaining(toId)).toBe(3)
+  })
+
+  it.each(["CANCELLED", "REJECTED", "COMPLETED"] as const)(
+    "не вычитает места статуса %s",
+    async (status) => {
+      await book(toId, status, 3)
+      expect(await remaining(toId)).toBe(3)
+      expect(
+        (await get({ minSeats: 3 }).expect(200)).body.items.some(
+          (item: { id: string }) => item.id === toId
+        )
+      ).toBe(true)
+    }
+  )
+
+  it("исключает полностью заполненные поездки даже без minSeats", async () => {
+    await book(toId, "PENDING", 3)
+    await book(fromId, "CONFIRMED", 1)
+    const result = await get().expect(200)
+    expect(result.body.total).toBe(4)
+    expect(
+      result.body.items.some((item: { id: string }) =>
+        [toId, fromId].includes(item.id)
+      )
+    ).toBe(false)
+  })
+
+  it("скрывает поездку при ошибочном превышении вместимости, не возвращая отрицательный остаток", async () => {
+    await book(toId, "PENDING", 2)
+    await book(toId, "CONFIRMED", 2, users[2]!)
+    const result = await get().expect(200)
+    expect(result.body.total).toBe(5)
+    expect(
+      result.body.items.some((item: { id: string }) => item.id === toId)
+    ).toBe(false)
+    expect(
+      result.body.items.every(
+        (item: { availableSeats: number }) => item.availableSeats > 0
+      )
+    ).toBe(true)
+  })
+
+  it("применяет остаток до сортировки, LIMIT/OFFSET и total", async () => {
+    await book(fromId, "CONFIRMED", 1)
+    await book(toId, "PENDING", 2)
+    const first = await get({ sort: "priceAsc", pageSize: 1 }).expect(200)
+    const second = await get({ sort: "priceAsc", pageSize: 1, page: 2 }).expect(
+      200
+    )
+    expect(first.body.total).toBe(5)
+    expect(second.body.total).toBe(5)
+    expect(first.body.items[0]).toMatchObject({ id: toId, availableSeats: 1 })
+    expect(second.body.items).toHaveLength(1)
+    expect(second.body.items[0].id).not.toBe(toId)
+    const filtered = await get({ minSeats: 2, pageSize: 2 }).expect(200)
+    expect(filtered.body.total).toBe(4)
+    expect(filtered.body.items).toHaveLength(2)
+    expect(
+      filtered.body.items.every(
+        (item: { availableSeats: number }) => item.availableSeats >= 2
+      )
+    ).toBe(true)
+  })
+
+  it("согласует строки и total при конкурентном появлении бронирования", async () => {
+    const [result] = await Promise.all([
+      get({
+        direction: "TO_CAMPUS",
+        date: "2099-11-09",
+        timeFrom: "08:00",
+        timeTo: "08:00",
+        minSeats: 3,
+      }).expect(200),
+      book(toId, "PENDING", 1),
+    ])
+    expect(result.body.items).toHaveLength(result.body.total)
+    expect([0, 1]).toContain(result.body.total)
+    if (result.body.items.length)
+      expect(result.body.items[0].availableSeats).toBe(3)
+    expect(
+      (
+        await get({
+          minSeats: 3,
+          date: "2099-11-09",
+          timeFrom: "08:00",
+          timeTo: "08:00",
+        }).expect(200)
+      ).body.total
+    ).toBe(0)
+  })
+
+  it("передаёт поисковый текст как параметр SQL", async () => {
+    expect((await get({ q: "' OR true --" }).expect(200)).body.total).toBe(0)
   })
 })

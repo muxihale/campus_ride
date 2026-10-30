@@ -4,6 +4,9 @@ import {
   IsBoolean,
   IsIn,
   IsISO8601,
+  IsInt,
+  Min,
+  Max,
   IsOptional,
   IsUUID,
   Matches,
@@ -20,7 +23,22 @@ export class PublicSearchDto extends OmitType(RideQueryDto, [
   "departureFrom",
   "departureTo",
   "sort",
+  "minSeats",
 ] as const) {
+  @ApiPropertyOptional({
+    type: Number,
+    minimum: 1,
+    maximum: 8,
+    description: "Минимальный свободный остаток с учётом PENDING и CONFIRMED",
+  })
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === "string" && /^[0-9]+$/.test(value) ? Number(value) : value
+  )
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(8)
+  minSeats?: number
   @ApiPropertyOptional({ enum: ["TO_CAMPUS", "FROM_CAMPUS"] })
   @IsOptional()
   @IsIn(["TO_CAMPUS", "FROM_CAMPUS"])
@@ -114,10 +132,15 @@ export class PublicRideDto {
   departureAt!: Date
   @ApiProperty({
     type: Number,
-    description:
-      "Предложено мест; остаток по бронированиям добавляется на этапе 30.2",
+    description: "Предложенное водителем количество мест",
   })
   seatsTotal!: number
+  @ApiProperty({
+    type: Number,
+    minimum: 0,
+    description: "Свободно мест: seatsTotal минус сумма мест PENDING/CONFIRMED",
+  })
+  availableSeats!: number
   @ApiProperty({ type: Number })
   priceKopecks!: number
   @ApiProperty({ type: Boolean })

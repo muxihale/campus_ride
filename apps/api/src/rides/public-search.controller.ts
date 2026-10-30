@@ -26,7 +26,7 @@ export class PublicSearchController {
   @ApiOperation({
     summary: "Найти опубликованные будущие поездки",
     description:
-      "Без сессии. Только активные водители. Дата и время — Екатеринбург; timeFrom/timeTo требуют date. На этапе 30.1 minSeats проверяет предложенное число мест; расчёт остатка добавляется отдельно.",
+      "Без сессии. Только активные водители. Дата и время — Екатеринбург; timeFrom/timeTo требуют date. minSeats проверяет свободный остаток с учётом PENDING/CONFIRMED; заполненные поездки исключаются.",
   })
   @ApiOkResponse({ type: PublicRideListDto })
   @ApiBadRequestResponse({
