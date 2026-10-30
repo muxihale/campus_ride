@@ -1,11 +1,8 @@
 import { cleanup, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, expect, it, vi } from "vitest"
-import {
-  SearchResults,
-  RideDetailsPending,
-  type PublicRide,
-} from "./SearchResults"
+import { SearchResults, type PublicRide } from "./SearchResults"
+import { searchBackLink } from "./PublicRide"
 import { App } from "./App"
 const ride: PublicRide = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -76,12 +73,9 @@ it("подготавливает ссылку на детали с точным 
     .getAttribute("href")!
   expect(href.startsWith(`#/ride/${ride.id}?`)).toBe(true)
   cleanup()
-  render(<RideDetailsPending query={href.split("?")[1]!} />)
-  expect(
-    screen
-      .getByRole("link", { name: "Вернуться к результатам" })
-      .getAttribute("href")
-  ).toBe(`#/search?${new URLSearchParams(query)}`)
+  expect(searchBackLink(href.split("?")[1]!)).toBe(
+    `#/search?${new URLSearchParams(query)}`
+  )
 })
 it("различает пустой поиск и опустевшую страницу", async () => {
   show([], 0, 1)
@@ -116,8 +110,7 @@ it("показывает бесплатную поездку и ограничи
   ).toBe(true)
 })
 it("не восстанавливает некорректные параметры возврата", () => {
-  render(<RideDetailsPending query="search=unknown%3Dvalue" />)
-  expect(screen.getByRole("link").getAttribute("href")).toBe("#/search")
+  expect(searchBackLink("search=unknown%3Dvalue")).toBe("#/search")
 })
 
 it("анонимный поиск получает карточки из API и сохраняет состояние после перехода туда и обратно", async () => {
@@ -127,6 +120,16 @@ it("анонимный поиск получает карточки из API и 
       return new Response(JSON.stringify({ message: "Требуется вход" }), {
         status: 401,
       })
+    if (path === `/api/rides/${ride.id}`)
+      return new Response(
+        JSON.stringify({
+          ...ride,
+          status: "PUBLISHED",
+          stops: [],
+          driver: { ...ride.driver, bio: null, rating: null, reviewCount: 0 },
+          vehicle: { ...ride.vehicle, passengerSeats: 4 },
+        })
+      )
     if (path.startsWith("/api/rides?"))
       return new Response(
         JSON.stringify({ items: [ride], total: 1, page: 1, pageSize: 20 })
@@ -145,6 +148,12 @@ it("анонимный поиск получает карточки из API и 
   await screen.findByRole("heading", { name: "Уралмаш → УрФУ" })
   await userEvent.click(screen.getByRole("link", { name: /^Подробнее:/ }))
   await screen.findByRole("heading", { name: "Карточка поездки" })
+  await screen.findByText("Пока нет отзывов")
+  expect(
+    fetchMock.mock.calls.some(
+      ([url]) => String(url) === `/api/rides/${ride.id}`
+    )
+  ).toBe(true)
   await userEvent.click(
     screen.getByRole("link", { name: "Вернуться к результатам" })
   )

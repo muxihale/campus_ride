@@ -3,7 +3,7 @@ import { CarFront, LoaderCircle, MapPin } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { ApiError, authRequest, type User } from "./auth"
 
-import { RideDetailsPending } from "./SearchResults"
+import { PublicRideScreen } from "./PublicRide"
 import { SearchScreen } from "./Search"
 import { Cabinet } from "./Cabinet"
 import type { Profile } from "./Profile"
@@ -168,7 +168,11 @@ export function App() {
       )}
       {publicDetail ? (
         <main className="flex-1 py-8 sm:py-12">
-          <RideDetailsPending query={hash.split("?").slice(1).join("?")} />
+          <PublicRideScreen
+            key={hash}
+            id={hash.split("?")[0]!.slice("#/ride/".length)}
+            query={hash.split("?").slice(1).join("?")}
+          />
         </main>
       ) : searching ? (
         <main className="flex-1 py-8 sm:py-12">

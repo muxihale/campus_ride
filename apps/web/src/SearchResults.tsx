@@ -1,7 +1,6 @@
 import { Button } from "@workspace/ui/components/button"
 import type { Page } from "./ride-data"
 import { ekaterinburgInput, kopecksToRubles } from "./ride-form"
-import { readSearch } from "./search-form"
 export type PublicRide = {
   id: string
   origin: { id: string; name: string; address: string }
@@ -157,28 +156,6 @@ export function SearchResults({
           Далее
         </Button>
       </nav>
-    </section>
-  )
-}
-// Маршрут перехода готов; содержимое публичной карточки добавляется на этапе 30.6.
-export function RideDetailsPending({ query }: { query: string }) {
-  const search = new URLSearchParams(query).get("search") ?? ""
-  const back =
-    readSearch(search).error || !search
-      ? "#/search"
-      : `#/search?${new URLSearchParams(search)}`
-  return (
-    <section className="mx-auto max-w-3xl space-y-5 rounded-2xl border bg-card p-6 sm:p-8">
-      <h1 className="text-2xl font-semibold">Карточка поездки</h1>
-      <p className="text-muted-foreground">
-        Подробная карточка будет доступна в следующем обновлении.
-      </p>
-      <a
-        href={back}
-        className="inline-block text-sm font-medium underline underline-offset-4"
-      >
-        Вернуться к результатам
-      </a>
     </section>
   )
 }
