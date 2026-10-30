@@ -3,6 +3,7 @@ import { CarFront, LoaderCircle, MapPin } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { ApiError, authRequest, type User } from "./auth"
 
+import { RideDetailsPending } from "./SearchResults"
 import { SearchScreen } from "./Search"
 import { Cabinet } from "./Cabinet"
 import type { Profile } from "./Profile"
@@ -24,6 +25,7 @@ export function App() {
     return () => window.removeEventListener("hashchange", changed)
   }, [])
   const searching = hash === "#/search" || hash.startsWith("#/search?")
+  const publicDetail = /^#\/ride\/[a-f0-9-]+(?:\?|$)/i.test(hash)
   const [user, setUser] = useState<User | null>(null)
   const [restoring, setRestoring] = useState(true)
   const [sessionError, setSessionError] = useState("")
@@ -150,7 +152,7 @@ export function App() {
         >
           Найти поездку
         </a>
-        {searching && (
+        {(searching || publicDetail) && (
           <a
             href={user ? "#/profile" : "#"}
             className="underline underline-offset-4"
@@ -164,7 +166,11 @@ export function App() {
           {error}
         </p>
       )}
-      {searching ? (
+      {publicDetail ? (
+        <main className="flex-1 py-8 sm:py-12">
+          <RideDetailsPending query={hash.split("?").slice(1).join("?")} />
+        </main>
+      ) : searching ? (
         <main className="flex-1 py-8 sm:py-12">
           <SearchScreen key={hash} query={hash.split("?").slice(1).join("?")} />
         </main>

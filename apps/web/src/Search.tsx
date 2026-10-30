@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react"
 import { Button } from "@workspace/ui/components/button"
 import { apiRequest } from "./auth"
+import { SearchResults, type PublicRide } from "./SearchResults"
+import type { Page } from "./ride-data"
 import { allPages } from "./ride-data"
 import {
   emptySearch,
@@ -21,7 +23,7 @@ export function SearchScreen({ query }: { query: string }) {
   } | null>(null)
   const [refsError, setRefsError] = useState("")
   const [result, setResult] = useState<{
-    total?: number
+    data?: Page<PublicRide>
     error?: string
   } | null>(null)
   const [retry, setRetry] = useState(0)
@@ -52,9 +54,9 @@ export function SearchScreen({ query }: { query: string }) {
   useEffect(() => {
     if (!query || initial.error) return
     let active = true
-    apiRequest<{ total: number }>(`rides?${new URLSearchParams(query)}`)
+    apiRequest<Page<PublicRide>>(`rides?${new URLSearchParams(query)}`)
       .then((body) => {
-        if (active) setResult({ total: body.total })
+        if (active) setResult({ data: body })
       })
       .catch((cause: unknown) => {
         if (active)
@@ -77,7 +79,13 @@ export function SearchScreen({ query }: { query: string }) {
     event.preventDefault()
     setError("")
     try {
-      const target = `#/search?${searchParams(values)}`
+      const params = searchParams(values)
+      if (!initial.error)
+        for (const key of ["sort", "pageSize"]) {
+          const value = new URLSearchParams(query).get(key)
+          if (value) params.set(key, value)
+        }
+      const target = `#/search?${params}`
       if (window.location.hash === target) {
         setResult(null)
         setRetry((value) => value + 1)
@@ -313,15 +321,8 @@ export function SearchScreen({ query }: { query: string }) {
               Повторить поиск
             </Button>
           </div>
-        ) : result?.total !== undefined ? (
-          <div className="rounded-xl border p-5">
-            <p role="status" className="font-medium">
-              Найдено поездок: {result.total}
-            </p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Карточки результатов будут доступны в следующем обновлении.
-            </p>
-          </div>
+        ) : result?.data ? (
+          <SearchResults data={result.data} query={query} />
         ) : (
           <p role="status" className="text-sm">
             Ищем поездки…
