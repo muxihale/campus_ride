@@ -1,21 +1,84 @@
 import {
   BadRequestException,
   Inject,
+  NotFoundException,
   Injectable,
   ServiceUnavailableException,
 } from "@nestjs/common"
 import { Prisma } from "../generated/prisma/client.js"
 import { PrismaService } from "../prisma/prisma.service.js"
-import type {
-  PublicRideDto,
-  PublicRideListDto,
-  PublicSearchDto,
-} from "./public-search.dto.js"
+import { PublicSearchDto } from "./public-search.dto.js"
+import type { PublicRideDetailDto } from "./public-detail.dto.js"
+import type { PublicRideDto, PublicRideListDto } from "./public-search.dto.js"
 
 @Injectable()
 export class PublicSearchService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
   async search(query: PublicSearchDto): Promise<PublicRideListDto> {
+    const available = this.availability(query)
+    const orderBy =
+      query.sort === "priceAsc"
+        ? Prisma.sql`"priceKopecks" ASC, "departureAt" ASC, "id" ASC`
+        : query.sort === "priceDesc"
+          ? Prisma.sql`"priceKopecks" DESC, "departureAt" ASC, "id" ASC`
+          : query.sort === "departureDesc"
+            ? Prisma.sql`"departureAt" DESC, "id" ASC`
+            : Prisma.sql`"departureAt" ASC, "id" ASC`
+    try {
+      const [items, counts] = await this.prisma.$transaction(
+        [
+          this.prisma.$queryRaw<PublicRideDto[]>(
+            Prisma.sql`${available} SELECT * FROM available ORDER BY ${orderBy} LIMIT ${query.pageSize} OFFSET ${(query.page - 1) * query.pageSize}`
+          ),
+          this.prisma.$queryRaw<{ total: number }[]>(
+            Prisma.sql`${available} SELECT COUNT(*)::integer AS "total" FROM available`
+          ),
+        ],
+        { isolationLevel: "RepeatableRead" }
+      )
+      return {
+        items,
+        total: counts[0]!.total,
+        page: query.page,
+        pageSize: query.pageSize,
+      }
+    } catch {
+      throw new ServiceUnavailableException("Поиск поездок временно недоступен")
+    }
+  }
+  async detail(id: string): Promise<PublicRideDetailDto> {
+    const available = this.availability(new PublicSearchDto(), id)
+    try {
+      const rows = await this.prisma.$queryRaw<
+        PublicRideDetailDto[]
+      >(Prisma.sql`${available}
+        SELECT a."id", 'PUBLISHED' AS "status", a."origin", a."destination", a."departureAt", a."seatsTotal", a."availableSeats", a."priceKopecks",
+          a."musicAllowed", a."luggageAllowed", a."smokingAllowed", a."conditions",
+          a."driver" || jsonb_build_object('bio', dp."bio", 'rating', rating."average", 'reviewCount', rating."count") AS "driver",
+          a."vehicle" || jsonb_build_object('passengerSeats', v."passengerSeats") AS "vehicle",
+          COALESCE((SELECT jsonb_agg(jsonb_build_object('position', s."position", 'location', jsonb_build_object('id', l."id", 'name', l."name", 'address', l."address")) ORDER BY s."position")
+            FROM "RideStop" s JOIN "Location" l ON l."id" = s."locationId" WHERE s."rideId" = a."id"), '[]'::jsonb) AS "stops"
+        FROM available a
+        JOIN "Ride" r ON r."id" = a."id"
+        JOIN "Vehicle" v ON v."id" = r."vehicleId"
+        JOIN "DriverProfile" dp ON dp."userId" = r."driverId"
+        LEFT JOIN LATERAL (
+          SELECT ROUND(AVG(rv."rating")::numeric, 2) AS "average", COUNT(*)::integer AS "count"
+          FROM "Review" rv JOIN "Booking" b ON b."id" = rv."bookingId" JOIN "Ride" history ON history."id" = b."rideId"
+          WHERE rv."recipientId" = dp."userId" AND rv."authorId" = b."passengerId" AND b."passengerId" <> dp."userId"
+            AND history."driverId" = dp."userId" AND history."status" = 'COMPLETED' AND b."status" = 'COMPLETED' AND rv."hiddenAt" IS NULL
+        ) rating ON true`)
+      if (!rows.length) throw new NotFoundException("Поездка недоступна")
+      return rows[0]!
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error
+      throw new ServiceUnavailableException(
+        "Карточка поездки временно недоступна"
+      )
+    }
+  }
+
+  private availability(query: PublicSearchDto, id?: string): Prisma.Sql {
     if ((query.timeFrom || query.timeTo) && !query.date)
       throw new BadRequestException("Для фильтра времени укажите дату")
     if (query.timeFrom && query.timeTo && query.timeFrom > query.timeTo)
@@ -39,6 +102,7 @@ export class PublicSearchService {
       Prisma.sql`u."status" = 'ACTIVE'`,
       Prisma.sql`EXISTS (SELECT 1 FROM "UserRole" ur WHERE ur."userId" = u."id" AND ur."role" = 'DRIVER')`,
     ]
+    if (id) conditions.push(Prisma.sql`r."id" = ${id}::uuid`)
     if (start) conditions.push(Prisma.sql`r."departureAt" >= ${start}`)
     if (end) conditions.push(Prisma.sql`r."departureAt" < ${end}`)
     if (query.originDistrictId)
@@ -76,7 +140,7 @@ export class PublicSearchService {
       )
     }
     // Остаток и фильтр считаются в БД до LIMIT/OFFSET, без загрузки всех заявок в приложение.
-    const available = Prisma.sql`WITH candidates AS (
+    return Prisma.sql`WITH candidates AS (
       SELECT r."id", r."departureAt", r."seatsTotal", r."priceKopecks", r."musicAllowed", r."luggageAllowed", r."smokingAllowed", r."conditions",
         jsonb_build_object('id', o."id", 'name', o."name", 'address', o."address") AS "origin",
         jsonb_build_object('id', d."id", 'name', d."name", 'address', d."address") AS "destination",
@@ -101,34 +165,5 @@ export class PublicSearchService {
     ), available AS (
       SELECT * FROM candidates WHERE "availableSeats" >= ${query.minSeats ?? 1}
     )`
-    const orderBy =
-      query.sort === "priceAsc"
-        ? Prisma.sql`"priceKopecks" ASC, "departureAt" ASC, "id" ASC`
-        : query.sort === "priceDesc"
-          ? Prisma.sql`"priceKopecks" DESC, "departureAt" ASC, "id" ASC`
-          : query.sort === "departureDesc"
-            ? Prisma.sql`"departureAt" DESC, "id" ASC`
-            : Prisma.sql`"departureAt" ASC, "id" ASC`
-    try {
-      const [items, counts] = await this.prisma.$transaction(
-        [
-          this.prisma.$queryRaw<PublicRideDto[]>(
-            Prisma.sql`${available} SELECT * FROM available ORDER BY ${orderBy} LIMIT ${query.pageSize} OFFSET ${(query.page - 1) * query.pageSize}`
-          ),
-          this.prisma.$queryRaw<{ total: number }[]>(
-            Prisma.sql`${available} SELECT COUNT(*)::integer AS "total" FROM available`
-          ),
-        ],
-        { isolationLevel: "RepeatableRead" }
-      )
-      return {
-        items,
-        total: counts[0]!.total,
-        page: query.page,
-        pageSize: query.pageSize,
-      }
-    } catch {
-      throw new ServiceUnavailableException("Поиск поездок временно недоступен")
-    }
   }
 }

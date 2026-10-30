@@ -20,7 +20,9 @@ const prefix = randomUUID()
 const districtId = randomUUID(),
   campusId = randomUUID(),
   originId = randomUUID(),
-  destinationId = randomUUID()
+  destinationId = randomUUID(),
+  stopA = randomUUID(),
+  stopB = randomUUID()
 
 describe("Публичный поиск (HTTP + PostgreSQL)", () => {
   let app: INestApplication, prisma: PrismaService
@@ -57,6 +59,22 @@ describe("Публичный поиск (HTTP + PostgreSQL)", () => {
           districtId,
           campusId,
           kind: "CAMPUS",
+        },
+      ],
+    })
+    await prisma.location.createMany({
+      data: [
+        {
+          id: stopA,
+          name: "Остановка А",
+          address: "Екатеринбург, Первомайская",
+          districtId,
+        },
+        {
+          id: stopB,
+          name: "Остановка Б",
+          address: "Екатеринбург, Мира",
+          districtId,
         },
       ],
     })
@@ -149,12 +167,20 @@ describe("Публичный поиск (HTTP + PostgreSQL)", () => {
     }
   })
   afterEach(async () => {
-    if (prisma)
+    if (prisma) {
+      await prisma.review.deleteMany({
+        where: { booking: { rideId: { in: rides } } },
+      })
       await prisma.booking.deleteMany({ where: { rideId: { in: rides } } })
+      await prisma.rideStop.deleteMany({ where: { rideId: { in: rides } } })
+    }
   })
   afterAll(async () => {
     try {
       if (prisma) {
+        await prisma.review.deleteMany({
+          where: { booking: { rideId: { in: rides } } },
+        })
         await prisma.booking.deleteMany({ where: { rideId: { in: rides } } })
         await prisma.ride.deleteMany({ where: { id: { in: rides } } })
         await prisma.vehicle.deleteMany({ where: { driverId: { in: users } } })
@@ -163,7 +189,7 @@ describe("Публичный поиск (HTTP + PostgreSQL)", () => {
         })
         await prisma.user.deleteMany({ where: { id: { in: users } } })
         await prisma.location.deleteMany({
-          where: { id: { in: [originId, destinationId] } },
+          where: { id: { in: [originId, destinationId, stopA, stopB] } },
         })
         await prisma.campus.deleteMany({ where: { id: campusId } })
         await prisma.district.deleteMany({ where: { id: districtId } })
@@ -448,5 +474,189 @@ describe("Публичный поиск (HTTP + PostgreSQL)", () => {
 
   it("передаёт поисковый текст как параметр SQL", async () => {
     expect((await get({ q: "' OR true --" }).expect(200)).body.total).toBe(0)
+  })
+  const detail = (id: string) =>
+    request(app.getHttpServer()).get(`/api/rides/${id}`)
+
+  it("возвращает публичную карточку без контактов и данных аккаунта, с отсутствующим рейтингом", async () => {
+    const result = await detail(toId)
+      .expect("Cache-Control", "no-store")
+      .expect(200)
+    expect(result.body).toMatchObject({
+      id: toId,
+      status: "PUBLISHED",
+      seatsTotal: 3,
+      availableSeats: 3,
+      priceKopecks: 15000,
+      stops: [],
+      driver: {
+        id: users[0],
+        fullName: "Анна Соколова",
+        bio: null,
+        rating: null,
+        reviewCount: 0,
+      },
+      vehicle: { make: "Kia", model: "Rio", color: "Белый", passengerSeats: 3 },
+    })
+    expect(
+      Object.keys(result.body.driver).sort((a, b) => a.localeCompare(b))
+    ).toEqual(["bio", "fullName", "id", "rating", "reviewCount"])
+    expect(
+      Object.keys(result.body.vehicle).sort((a, b) => a.localeCompare(b))
+    ).toEqual(["color", "make", "model", "passengerSeats"])
+    for (const privateField of [
+      "passwordHash",
+      "email",
+      "phone",
+      "registrationNumber",
+      "sessions",
+      "bookings",
+    ])
+      expect(result.text).not.toContain(privateField)
+  })
+
+  it("возвращает порядок и адреса промежуточных остановок", async () => {
+    await prisma.rideStop.createMany({
+      data: [
+        { rideId: toId, locationId: stopA, position: 2 },
+        { rideId: toId, locationId: stopB, position: 1 },
+      ],
+    })
+    const result = await detail(toId).expect(200)
+    expect(result.body.stops).toEqual([
+      {
+        position: 1,
+        location: {
+          id: stopB,
+          name: "Остановка Б",
+          address: "Екатеринбург, Мира",
+        },
+      },
+      {
+        position: 2,
+        location: {
+          id: stopA,
+          name: "Остановка А",
+          address: "Екатеринбург, Первомайская",
+        },
+      },
+    ])
+  })
+
+  it("вычисляет тот же остаток, что поиск, и скрывает заполненную поездку", async () => {
+    await book(toId, "PENDING", 1)
+    await book(toId, "CONFIRMED", 1, users[2]!)
+    expect((await detail(toId).expect(200)).body.availableSeats).toBe(1)
+    expect(await remaining(toId)).toBe(1)
+    await prisma.booking.updateMany({
+      where: { rideId: toId, status: "PENDING" },
+      data: { seats: 2 },
+    })
+    const full = await detail(toId).expect(404)
+    const missing = await detail(randomUUID()).expect(404)
+    expect(full.body).toEqual(missing.body)
+  })
+
+  it("одинаково скрывает черновики, прошлые поездки, закрытые статусы и недоступных водителей", async () => {
+    const visible = (await get().expect(200)).body.items.map(
+      (item: { id: string }) => item.id
+    )
+    const missing = await detail(randomUUID()).expect(404)
+    for (const id of rides.filter((id) => !visible.includes(id))) {
+      expect((await detail(id).expect(404)).body).toEqual(missing.body)
+    }
+    await detail("invalid").expect(400)
+  })
+
+  it("считает только видимые отзывы пассажиров водителю, не смешивая рейтинг пассажира", async () => {
+    const current = await prisma.ride.findUniqueOrThrow({ where: { id: toId } })
+    const history = await prisma.ride.create({
+      data: {
+        driverId: users[0]!,
+        vehicleId: current.vehicleId,
+        originId,
+        destinationId,
+        departureAt: new Date("2020-01-01T00:00:00Z"),
+        seatsTotal: 3,
+        priceKopecks: 0,
+        status: "COMPLETED",
+      },
+    })
+    rides.push(history.id)
+    for (const [rating, hiddenAt] of [
+      [5, null],
+      [3, null],
+      [1, new Date()],
+    ] as const) {
+      const booking = await book(history.id, "COMPLETED", 1)
+      await prisma.review.create({
+        data: {
+          bookingId: booking.id,
+          authorId: users[1]!,
+          recipientId: users[0]!,
+          rating,
+          comment: "Отзыв о поездке",
+          hiddenAt,
+        },
+      })
+    }
+    const invalid = await book(history.id, "COMPLETED", 1)
+    await prisma.review.create({
+      data: {
+        bookingId: invalid.id,
+        authorId: users[2]!,
+        recipientId: users[0]!,
+        rating: 1,
+        comment: "Автор не пассажир бронирования",
+      },
+    })
+    const otherCar = await prisma.vehicle.findFirstOrThrow({
+      where: { driverId: users[1] },
+    })
+    const passengerHistory = await prisma.ride.create({
+      data: {
+        driverId: users[1]!,
+        vehicleId: otherCar.id,
+        originId,
+        destinationId,
+        departureAt: new Date("2020-01-01T00:00:00Z"),
+        seatsTotal: 3,
+        priceKopecks: 0,
+        status: "COMPLETED",
+      },
+    })
+    rides.push(passengerHistory.id)
+    const asPassenger = await book(
+      passengerHistory.id,
+      "COMPLETED",
+      1,
+      users[0]!
+    )
+    await prisma.review.create({
+      data: {
+        bookingId: asPassenger.id,
+        authorId: users[1]!,
+        recipientId: users[0]!,
+        rating: 1,
+        comment: "Рейтинг в роли пассажира",
+      },
+    })
+    const result = await detail(toId).expect(200)
+    expect(result.body.driver).toMatchObject({ rating: 4, reviewCount: 2 })
+    expect(result.text).not.toContain("Отзыв о поездке")
+    expect(result.text).not.toContain("hiddenAt")
+  })
+
+  it("возвращает безопасный 503 при сбое карточки", async () => {
+    const read = vi
+      .spyOn(prisma, "$queryRaw")
+      .mockRejectedValueOnce(new Error("private database credentials"))
+    try {
+      const result = await detail(toId).expect(503)
+      expect(result.body.message).toBe("Карточка поездки временно недоступна")
+      expect(result.text).not.toContain("private database credentials")
+    } finally {
+      read.mockRestore()
+    }
   })
 })

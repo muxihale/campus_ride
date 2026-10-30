@@ -4,15 +4,19 @@ import {
   Header,
   Inject,
   Query,
+  Param,
+  ParseUUIDPipe,
   ValidationPipe,
 } from "@nestjs/common"
 import {
   ApiBadRequestResponse,
   ApiOkResponse,
+  ApiNotFoundResponse,
   ApiOperation,
   ApiResponse,
   ApiTags,
 } from "@nestjs/swagger"
+import { PublicRideDetailDto } from "./public-detail.dto.js"
 import { PublicRideListDto, PublicSearchDto } from "./public-search.dto.js"
 import { PublicSearchService } from "./public-search.service.js"
 @ApiTags("Публичный поиск поездок")
@@ -45,5 +49,21 @@ export class PublicSearchController {
     query: PublicSearchDto
   ): Promise<PublicRideListDto> {
     return this.search.search(query)
+  }
+  @Get(":id")
+  @Header("Cache-Control", "no-store")
+  @ApiOperation({
+    summary: "Получить публичную карточку доступной поездки",
+    description:
+      "Без сессии. Те же ограничения доступности и расчёт остатка, что в поиске. Только публичные данные водителя и автомобиля.",
+  })
+  @ApiOkResponse({ type: PublicRideDetailDto })
+  @ApiBadRequestResponse({ description: "Неверный UUID" })
+  @ApiNotFoundResponse({ description: "Поездка отсутствует или недоступна" })
+  @ApiResponse({ status: 503, description: "Карточка временно недоступна" })
+  detail(
+    @Param("id", new ParseUUIDPipe()) id: string
+  ): Promise<PublicRideDetailDto> {
+    return this.search.detail(id)
   }
 }
