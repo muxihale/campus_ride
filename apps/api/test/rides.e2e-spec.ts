@@ -358,12 +358,12 @@ describe("Создание черновика поездки (HTTP + PostgreSQL)
     }
   })
 
-  it("публикует создание и публикацию в Swagger без будущего публичного поиска", async () => {
+  it("публикует создание, публикацию и поиск в Swagger без публичной карточки", async () => {
     const result = await request(app.getHttpServer())
       .get("/api/docs-json")
       .expect(200)
     expect(result.body.paths["/api/rides"].post).toBeDefined()
-    expect(result.body.paths["/api/rides"].get).toBeUndefined()
+    expect(result.body.paths["/api/rides"].get).toBeDefined()
     expect(result.body.paths["/api/rides/{id}/publish"].post).toBeDefined()
   })
   function list(query: Record<string, unknown> = {}) {
