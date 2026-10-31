@@ -1,3 +1,4 @@
+import { BookingsModule } from "./bookings/bookings.module.js"
 import { Module } from "@nestjs/common"
 import { ConfigModule } from "@nestjs/config"
 import { HealthController } from "./health/health.controller.js"
@@ -31,6 +32,7 @@ import { AuthModule } from "./auth/auth.module.js"
     VehiclesModule,
     LocationsModule,
     RidesModule,
+    BookingsModule,
   ],
   controllers: [HealthController],
 })
