@@ -75,6 +75,15 @@ export function App() {
     setNotice("")
     try {
       setUser(await authRequest<User>(mode, body))
+      const target = new URLSearchParams(
+        window.location.hash.split("?").slice(1).join("?")
+      ).get("returnTo")
+      if (
+        window.location.hash.startsWith("#/login?") &&
+        target &&
+        /^#\/ride\/[a-f0-9-]+(?:\?|$)/i.test(target)
+      )
+        window.location.assign(target)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось войти")
     } finally {
@@ -170,6 +179,9 @@ export function App() {
         <main className="flex-1 py-8 sm:py-12">
           <PublicRideScreen
             key={hash}
+            user={user}
+            restoring={restoring}
+            onExpired={sessionExpired}
             id={hash.split("?")[0]!.slice("#/ride/".length)}
             query={hash.split("?").slice(1).join("?")}
           />

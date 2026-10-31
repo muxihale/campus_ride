@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Button } from "@workspace/ui/components/button"
-import { ApiError, apiRequest } from "./auth"
+import { BookingForm } from "./BookingForm"
+import { ApiError, apiRequest, type User } from "./auth"
 import type { PublicRide } from "./SearchResults"
 import { ekaterinburgInput, kopecksToRubles } from "./ride-form"
 import { readSearch } from "./search-form"
@@ -20,7 +21,19 @@ export function searchBackLink(query: string) {
     ? "#/search"
     : `#/search?${new URLSearchParams(search)}`
 }
-export function PublicRideScreen({ id, query }: { id: string; query: string }) {
+export function PublicRideScreen({
+  id,
+  query,
+  user = null,
+  restoring = false,
+  onExpired,
+}: {
+  id: string
+  query: string
+  user?: User | null
+  restoring?: boolean
+  onExpired?: () => void
+}) {
   const [result, setResult] = useState<{
     ride?: PublicRideDetail
     error?: string
@@ -111,6 +124,21 @@ export function PublicRideScreen({ id, query }: { id: string; query: string }) {
               Свободных мест: <strong>{ride.availableSeats}</strong> из{" "}
               {ride.seatsTotal}
             </p>
+            <BookingForm
+              key={user?.id ?? "guest"}
+              ride={ride}
+              user={user}
+              restoring={restoring}
+              onExpired={onExpired}
+              returnTo={`#/ride/${id}${query ? `?${query}` : ""}`}
+              onSeats={(availableSeats) =>
+                setResult((current) =>
+                  current?.ride
+                    ? { ride: { ...current.ride, availableSeats } }
+                    : current
+                )
+              }
+            />
             <div className="grid gap-6 md:grid-cols-2">
               <section className="space-y-3 rounded-xl border p-5">
                 <h3 className="text-lg font-semibold">Маршрут</h3>
