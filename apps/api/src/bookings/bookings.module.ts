@@ -1,3 +1,5 @@
+import { DriverBookingsController } from "./driver-bookings.controller.js"
+import { DriverBookingsService } from "./driver-bookings.service.js"
 import { OwnBookingsController } from "./own-bookings.controller.js"
 import { OwnBookingsService } from "./own-bookings.service.js"
 import { BookingDecisionsController } from "./booking-decisions.controller.js"
@@ -13,7 +15,13 @@ import { BookingsService } from "./bookings.service.js"
     BookingsController,
     BookingDecisionsController,
     OwnBookingsController,
+    DriverBookingsController,
   ],
-  providers: [BookingsService, OwnBookingsService, TrustedOriginGuard],
+  providers: [
+    BookingsService,
+    OwnBookingsService,
+    DriverBookingsService,
+    TrustedOriginGuard,
+  ],
 })
 export class BookingsModule {}

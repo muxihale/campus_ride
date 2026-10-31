@@ -66,6 +66,7 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
           ...(user.roles.includes("DRIVER")
             ? [
                 { path: "rides", label: "Мои поездки" },
+                { path: "ride-bookings", label: "Заявки пассажиров" },
                 { path: "vehicles", label: "Мои автомобили" },
                 { path: "rides/new", label: "Создать поездку" },
               ]
@@ -88,8 +89,10 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
           </a>
         ))}
       </nav>
-      {current === "bookings" && user.roles.includes("PASSENGER") ? (
-        <BookingsScreen onExpired={onExpired} />
+      {current === "ride-bookings" && user.roles.includes("DRIVER") ? (
+        <BookingsScreen key="driver-bookings" driver onExpired={onExpired} />
+      ) : current === "bookings" && user.roles.includes("PASSENGER") ? (
+        <BookingsScreen key="passenger-bookings" onExpired={onExpired} />
       ) : current === "profile" ? (
         <ProfileScreen onSaved={onSaved} onExpired={onExpired} />
       ) : current === "vehicles" && user.roles.includes("DRIVER") ? (
@@ -131,8 +134,14 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
               >
                 Новая поездка
               </a>
+              <a
+                href="#/ride-bookings"
+                className="block text-sm font-medium underline underline-offset-4"
+              >
+                Открыть заявки пассажиров
+              </a>
               <p className="text-sm text-muted-foreground">
-                Заявки пассажиров и статистика появятся позже.
+                Статистика появится позже.
               </p>
             </div>
           ) : destination.path === "passenger" ? (

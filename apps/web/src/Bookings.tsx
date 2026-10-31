@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useRef, useState, type FormEvent } from "react"
 import { Button } from "@workspace/ui/components/button"
 import { ApiError, apiRequest } from "./auth"
 import type { Page, RideLocation } from "./ride-data"
@@ -24,8 +24,10 @@ export type OwnBooking = {
   unitPriceKopecks: number
   cancellationReason: string | null
   createdAt: string
+  passenger?: { id: string; fullName: string; affiliation: string | null }
   ride: {
     id: string
+    availableSeats?: number
     status: string
     departureAt: string
     origin: RideLocation
@@ -48,7 +50,29 @@ const empty = {
 const input =
   "mt-2 h-11 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
 const money = (n: number) => `${kopecksToRubles(n).replace(".", ",")} ₽`
-export function BookingsScreen({ onExpired }: { onExpired: () => void }) {
+export function BookingsScreen({
+  onExpired,
+  driver = false,
+}: {
+  onExpired: () => void
+  driver?: boolean
+}) {
+  const [command, setCommand] = useState<{
+    item: OwnBooking
+    kind: "confirm" | "reject"
+  } | null>(null)
+  const [reason, setReason] = useState("")
+  const [pending, setPending] = useState(false)
+  const [notice, setNotice] = useState("")
+  const [commandError, setCommandError] = useState("")
+  const busy = useRef(false)
+  const active = useRef(true)
+  useEffect(() => {
+    active.current = true
+    return () => {
+      active.current = false
+    }
+  }, [])
   const [draft, setDraft] = useState(empty)
   const [query, setQuery] = useState("")
   const [page, setPage] = useState(1)
@@ -57,6 +81,7 @@ export function BookingsScreen({ onExpired }: { onExpired: () => void }) {
   const key = `${query}&page=${page}&pageSize=10|${revision}`
   const [result, setResult] = useState<{
     key: string
+    loadedAt?: number
     data?: Page<OwnBooking>
     error?: string
   }>({ key: "" })
@@ -69,13 +94,13 @@ export function BookingsScreen({ onExpired }: { onExpired: () => void }) {
   useEffect(() => {
     let active = true
     apiRequest<Page<OwnBooking>>(
-      `me/bookings?${query}${query ? "&" : ""}page=${page}&pageSize=10`
+      `${driver ? "me/ride-bookings" : "me/bookings"}?${query}${query ? "&" : ""}page=${page}&pageSize=10`
     )
       .then((data) => {
         if (!active) return
         const last = Math.max(1, Math.ceil(data.total / data.pageSize))
         if (page > last) setPage(last)
-        else setResult({ key, data })
+        else setResult({ key, data, loadedAt: Date.now() })
       })
       .catch((cause: unknown) => {
         if (!active) return
@@ -92,10 +117,11 @@ export function BookingsScreen({ onExpired }: { onExpired: () => void }) {
     return () => {
       active = false
     }
-  }, [query, page, revision, key, onExpired])
+  }, [query, page, revision, key, onExpired, driver])
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError("")
+    setCommand(null)
     try {
       const params = new URLSearchParams()
       for (const name of [
@@ -130,6 +156,53 @@ export function BookingsScreen({ onExpired }: { onExpired: () => void }) {
       setError(cause instanceof Error ? cause.message : "Проверьте фильтры")
     }
   }
+  async function decide(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!command || busy.current) return
+    if (
+      command.kind === "reject" &&
+      (!reason.trim() || reason.trim().length > 500)
+    ) {
+      setCommandError("Укажите причину от 1 до 500 символов")
+      return
+    }
+    busy.current = true
+    setPending(true)
+    setCommandError("")
+    setNotice("")
+    try {
+      await apiRequest(
+        `bookings/${command.item.id}/${command.kind}`,
+        "POST",
+        command.kind === "reject" ? { reason: reason.trim() } : {}
+      )
+      if (!active.current) return
+      setNotice(
+        command.kind === "confirm"
+          ? "Заявка подтверждена."
+          : "Заявка отклонена."
+      )
+      setCommand(null)
+      setRevision((value) => value + 1)
+    } catch (cause) {
+      if (!active.current) return
+      if (cause instanceof ApiError && cause.status === 401) onExpired()
+      else {
+        setCommandError(
+          cause instanceof Error
+            ? cause.message
+            : "Не удалось сохранить решение"
+        )
+        if (cause instanceof ApiError && [404, 409].includes(cause.status)) {
+          setCommand(null)
+          setRevision((value) => value + 1)
+        }
+      }
+    } finally {
+      busy.current = false
+      if (active.current) setPending(false)
+    }
+  }
   const change = (name: keyof typeof empty, value: string) => {
     setDraft((current) => ({ ...current, [name]: value }))
     setError("")
@@ -140,146 +213,213 @@ export function BookingsScreen({ onExpired }: { onExpired: () => void }) {
       aria-labelledby="bookings-title"
     >
       <h1 id="bookings-title" className="text-2xl font-semibold">
-        Мои заявки
+        {driver ? "Заявки пассажиров" : "Мои заявки"}
       </h1>
       <p className="text-sm text-muted-foreground">
         Предстоящие поездки и история бронирований. Время — Екатеринбург
         (UTC+5).
       </p>
       <form onSubmit={submit} className="space-y-4">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <label className="text-sm font-medium">
-            Поиск по маршруту, водителю или автомобилю
-            <input
-              className={input}
-              value={draft.q}
-              maxLength={100}
-              onChange={(event) => change("q", event.target.value)}
-            />
-          </label>
-          <label className="text-sm font-medium">
-            Раздел
-            <select
-              className={input}
-              value={draft.period}
-              onChange={(event) => change("period", event.target.value)}
+        <fieldset disabled={pending} className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="text-sm font-medium">
+              {driver
+                ? "Поиск по пассажиру, маршруту или автомобилю"
+                : "Поиск по маршруту, водителю или автомобилю"}
+              <input
+                className={input}
+                value={draft.q}
+                maxLength={100}
+                onChange={(event) => change("q", event.target.value)}
+              />
+            </label>
+            <label className="text-sm font-medium">
+              Раздел
+              <select
+                className={input}
+                value={draft.period}
+                onChange={(event) => change("period", event.target.value)}
+              >
+                <option value="all">Все заявки</option>
+                <option value="upcoming">Предстоящие поездки</option>
+                <option value="history">История</option>
+              </select>
+            </label>
+            <label className="text-sm font-medium">
+              Статус заявки
+              <select
+                className={input}
+                value={draft.status}
+                onChange={(event) => change("status", event.target.value)}
+              >
+                <option value="">Любой</option>
+                {Object.entries(bookingStatusNames).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm font-medium">
+              Статус поездки
+              <select
+                className={input}
+                value={draft.rideStatus}
+                onChange={(event) => change("rideStatus", event.target.value)}
+              >
+                <option value="">Любой</option>
+                {Object.entries(rideStatusNames).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm font-medium">
+              Минимум мест в заявке
+              <input
+                className={input}
+                type="number"
+                min="1"
+                max="8"
+                value={draft.minSeats}
+                onChange={(event) => change("minSeats", event.target.value)}
+              />
+            </label>
+            <label className="text-sm font-medium">
+              Максимальная цена места, ₽
+              <input
+                className={input}
+                inputMode="decimal"
+                value={draft.maxPrice}
+                onChange={(event) => change("maxPrice", event.target.value)}
+              />
+            </label>
+            <label className="text-sm font-medium">
+              Отправление от
+              <input
+                className={input}
+                type="datetime-local"
+                value={draft.departureFrom}
+                onChange={(event) =>
+                  change("departureFrom", event.target.value)
+                }
+              />
+            </label>
+            <label className="text-sm font-medium">
+              Отправление до
+              <input
+                className={input}
+                type="datetime-local"
+                value={draft.departureTo}
+                onChange={(event) => change("departureTo", event.target.value)}
+              />
+            </label>
+            <label className="text-sm font-medium">
+              Сортировка
+              <select
+                className={input}
+                value={draft.sort}
+                onChange={(event) => change("sort", event.target.value)}
+              >
+                <option value="departureAsc">Ближайшее отправление</option>
+                <option value="departureDesc">Позднее отправление</option>
+                <option value="createdDesc">Новые заявки</option>
+              </select>
+            </label>
+          </div>
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-3">
+            <Button type="submit">Применить фильтры</Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setCommand(null)
+                setDraft(empty)
+                setQuery("")
+                setPage(1)
+                setError("")
+                setRevision((value) => value + 1)
+              }}
             >
-              <option value="all">Все заявки</option>
-              <option value="upcoming">Предстоящие поездки</option>
-              <option value="history">История</option>
-            </select>
-          </label>
-          <label className="text-sm font-medium">
-            Статус заявки
-            <select
-              className={input}
-              value={draft.status}
-              onChange={(event) => change("status", event.target.value)}
+              Сбросить фильтры
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={loading || pending}
+              onClick={() => setRevision((value) => value + 1)}
             >
-              <option value="">Любой</option>
-              {Object.entries(bookingStatusNames).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm font-medium">
-            Статус поездки
-            <select
-              className={input}
-              value={draft.rideStatus}
-              onChange={(event) => change("rideStatus", event.target.value)}
-            >
-              <option value="">Любой</option>
-              {Object.entries(rideStatusNames).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm font-medium">
-            Минимум мест в заявке
-            <input
-              className={input}
-              type="number"
-              min="1"
-              max="8"
-              value={draft.minSeats}
-              onChange={(event) => change("minSeats", event.target.value)}
-            />
-          </label>
-          <label className="text-sm font-medium">
-            Максимальная цена места, ₽
-            <input
-              className={input}
-              inputMode="decimal"
-              value={draft.maxPrice}
-              onChange={(event) => change("maxPrice", event.target.value)}
-            />
-          </label>
-          <label className="text-sm font-medium">
-            Отправление от
-            <input
-              className={input}
-              type="datetime-local"
-              value={draft.departureFrom}
-              onChange={(event) => change("departureFrom", event.target.value)}
-            />
-          </label>
-          <label className="text-sm font-medium">
-            Отправление до
-            <input
-              className={input}
-              type="datetime-local"
-              value={draft.departureTo}
-              onChange={(event) => change("departureTo", event.target.value)}
-            />
-          </label>
-          <label className="text-sm font-medium">
-            Сортировка
-            <select
-              className={input}
-              value={draft.sort}
-              onChange={(event) => change("sort", event.target.value)}
-            >
-              <option value="departureAsc">Ближайшее отправление</option>
-              <option value="departureDesc">Позднее отправление</option>
-              <option value="createdDesc">Новые заявки</option>
-            </select>
-          </label>
-        </div>
-        {error && (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        )}
-        <div className="flex flex-wrap gap-3">
-          <Button type="submit">Применить фильтры</Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              setDraft(empty)
-              setQuery("")
-              setPage(1)
-              setError("")
-              setRevision((value) => value + 1)
-            }}
-          >
-            Сбросить фильтры
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={loading}
-            onClick={() => setRevision((value) => value + 1)}
-          >
-            Обновить заявки
-          </Button>
-        </div>
+              Обновить заявки
+            </Button>
+          </div>
+        </fieldset>
       </form>
+      {notice && (
+        <p role="status" className="rounded-lg bg-muted p-3 text-sm">
+          {notice}
+        </p>
+      )}
+      {commandError && (
+        <p role="alert" className="text-sm text-destructive">
+          {commandError}
+        </p>
+      )}
+      {command && (
+        <form
+          onSubmit={decide}
+          className="space-y-4 rounded-xl border border-primary/30 p-5"
+          aria-label="Решение по заявке"
+        >
+          <h2 className="text-lg font-semibold">
+            {command.kind === "confirm"
+              ? "Подтвердить заявку?"
+              : "Отклонить заявку?"}
+          </h2>
+          <p>
+            {command.item.passenger?.fullName} · {command.item.ride.origin.name}{" "}
+            → {command.item.ride.destination.name} · Мест: {command.item.seats}
+          </p>
+          {command.kind === "reject" && (
+            <label className="block text-sm font-medium">
+              Причина отклонения
+              <textarea
+                className={`${input} min-h-24 py-3`}
+                required
+                maxLength={500}
+                disabled={pending}
+                value={reason}
+                onChange={(event) => {
+                  setReason(event.target.value)
+                  setCommandError("")
+                }}
+              />
+            </label>
+          )}
+          <div className="flex flex-wrap gap-3">
+            <Button type="submit" disabled={pending}>
+              {pending
+                ? "Сохраняем решение…"
+                : command.kind === "confirm"
+                  ? "Подтвердить заявку"
+                  : "Отклонить заявку"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending}
+              onClick={() => setCommand(null)}
+            >
+              Отмена
+            </Button>
+          </div>
+        </form>
+      )}
       {loading ? (
         <p role="status">Загружаем заявки…</p>
       ) : result.error ? (
@@ -332,7 +472,12 @@ export function BookingsScreen({ onExpired }: { onExpired: () => void }) {
                         )}{" "}
                         · Екатеринбург
                       </p>
-                      <p>Водитель: {item.ride.driver.fullName}</p>
+                      <p>
+                        {" "}
+                        {driver
+                          ? `Пассажир: ${item.passenger?.fullName}`
+                          : `Водитель: ${item.ride.driver.fullName}`}
+                      </p>
                       <p className="text-sm text-muted-foreground">
                         Посадка: {item.ride.origin.address}
                       </p>
@@ -356,6 +501,47 @@ export function BookingsScreen({ onExpired }: { onExpired: () => void }) {
                       <p className="text-xs break-all text-muted-foreground">
                         Номер заявки: {item.id}
                       </p>
+                      {driver && (
+                        <>
+                          <p className="text-sm text-muted-foreground">
+                            {item.passenger?.affiliation ||
+                              "Принадлежность к университету не указана"}
+                          </p>
+                          <p className="font-medium">
+                            Свободных мест в поездке: {item.ride.availableSeats}
+                          </p>
+                          {item.status === "PENDING" &&
+                            item.ride.status === "PUBLISHED" &&
+                            new Date(item.ride.departureAt).getTime() >
+                              (result.loadedAt ?? 0) && (
+                              <div className="flex flex-wrap gap-3">
+                                {(["confirm", "reject"] as const).map(
+                                  (kind) => (
+                                    <Button
+                                      key={kind}
+                                      variant={
+                                        kind === "confirm"
+                                          ? "default"
+                                          : "outline"
+                                      }
+                                      disabled={pending}
+                                      onClick={() => {
+                                        setCommand({ item, kind })
+                                        setReason("")
+                                        setCommandError("")
+                                        setNotice("")
+                                      }}
+                                    >
+                                      {kind === "confirm"
+                                        ? "Подтвердить"
+                                        : "Отклонить"}
+                                    </Button>
+                                  )
+                                )}
+                              </div>
+                            )}
+                        </>
+                      )}
                       <a
                         href={`#/ride/${item.rideId}`}
                         className="inline-block text-sm font-medium underline underline-offset-4"
@@ -377,8 +563,11 @@ export function BookingsScreen({ onExpired }: { onExpired: () => void }) {
             >
               <Button
                 variant="outline"
-                disabled={page <= 1}
-                onClick={() => setPage((value) => value - 1)}
+                disabled={pending || page <= 1}
+                onClick={() => {
+                  setCommand(null)
+                  setPage((value) => value - 1)
+                }}
               >
                 Назад
               </Button>
@@ -388,8 +577,11 @@ export function BookingsScreen({ onExpired }: { onExpired: () => void }) {
               </span>
               <Button
                 variant="outline"
-                disabled={page * data.pageSize >= data.total}
-                onClick={() => setPage((value) => value + 1)}
+                disabled={pending || page * data.pageSize >= data.total}
+                onClick={() => {
+                  setCommand(null)
+                  setPage((value) => value + 1)
+                }}
               >
                 Далее
               </Button>

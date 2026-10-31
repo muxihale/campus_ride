@@ -908,4 +908,146 @@ describe("Создание заявки и решения водителя (HTTP
       spy.mockRestore()
     }
   })
+  const driverList = (query = "", account = 0) =>
+    request(app.getHttpServer())
+      .get(`/api/me/ride-bookings${query ? `?${query}` : ""}`)
+      .set("Cookie", accounts[account]!.cookie)
+  it("водитель видит заявки только своих поездок, пассажиров и остаток без ключей и контактов", async () => {
+    await listFixture()
+    const result = await driverList().expect(200)
+    expect(result.headers["cache-control"]).toBe("no-store")
+    expect(result.body.total).toBe(4)
+    expect(
+      result.body.items.find(
+        (item: { rideId: string }) => item.rideId === rideId
+      )
+    ).toMatchObject({
+      passenger: { id: expect.any(String), fullName: "Анна Соколова" },
+      ride: { availableSeats: 0 },
+    })
+    for (const field of [
+      "requestKey",
+      "passwordHash",
+      "phone",
+      "email",
+      "registrationNumber",
+      "bookings",
+      "tokenHash",
+    ])
+      expect(JSON.stringify(result.body)).not.toContain(`"${field}"`)
+    await prisma.userRole.create({
+      data: { userId: accounts[2]!.id, role: "DRIVER" },
+    })
+    try {
+      expect((await driverList("", 2).expect(200)).body).toMatchObject({
+        items: [],
+        total: 0,
+      })
+    } finally {
+      await prisma.userRole.delete({
+        where: { userId_role: { userId: accounts[2]!.id, role: "DRIVER" } },
+      })
+    }
+  })
+  it("фильтрует заявки водителя по поездке, статусам, времени, местам и цене", async () => {
+    await listFixture()
+    const result = await driverList(
+      `rideId=${rideId}&status=PENDING&rideStatus=PUBLISHED&minSeats=2&maxPriceKopecks=15015&period=upcoming&departureFrom=2099-11-09T03:00:00Z&departureTo=2099-11-09T03:00:00Z`
+    ).expect(200)
+    expect(result.body.total).toBe(1)
+    expect(result.body.items[0].seats).toBe(2)
+    expect(
+      (await driverList(`rideId=${randomUUID()}`).expect(200)).body.total
+    ).toBe(0)
+    expect((await driverList("period=history").expect(200)).body.total).toBe(2)
+    expect((await driverList("maxPriceKopecks=0").expect(200)).body.total).toBe(
+      1
+    )
+  })
+  it("ищет пассажиров по имени и принадлежности к университету", async () => {
+    await listFixture()
+    await prisma.user.update({
+      where: { id: accounts[1]!.id },
+      data: { fullName: "Мария Лебедева", affiliation: "ИРИТ-РТФ" },
+    })
+    try {
+      for (const q of ["лебедева", "ИРИТ-РТФ"])
+        expect(
+          (await driverList(`q=${encodeURIComponent(q)}`).expect(200)).body
+            .total
+        ).toBe(3)
+      expect(
+        (await driverList(`q=${encodeURIComponent("Не по пути")}`).expect(200))
+          .body.total
+      ).toBe(1)
+    } finally {
+      await prisma.user.update({
+        where: { id: accounts[1]!.id },
+        data: { fullName: "Анна Соколова", affiliation: null },
+      })
+    }
+  })
+  it("список водителя отражает решение и освободившиеся места", async () => {
+    const id = await pending(2)
+    expect(
+      (await driverList("status=PENDING").expect(200)).body.items[0].ride
+        .availableSeats
+    ).toBe(1)
+    await decide(id, "reject", { reason: "Изменился маршрут" }).expect(200)
+    expect((await driverList("status=PENDING").expect(200)).body.total).toBe(0)
+    const result = await driverList("status=REJECTED").expect(200)
+    expect(result.body.items[0]).toMatchObject({
+      cancellationReason: "Изменился маршрут",
+      ride: { availableSeats: 3 },
+    })
+  })
+  it("сортирует и разбивает заявки водителя на стабильные страницы", async () => {
+    await listFixture()
+    const ids: string[] = []
+    for (let page = 1; page <= 4; page++) {
+      const result = await driverList(
+        `page=${page}&pageSize=1&sort=createdDesc`
+      ).expect(200)
+      expect(result.body.total).toBe(4)
+      ids.push(result.body.items[0].id)
+    }
+    expect(new Set(ids).size).toBe(4)
+    expect((await driverList("page=99").expect(200)).body).toMatchObject({
+      items: [],
+      total: 4,
+    })
+  })
+  it.each([
+    "rideId=bad",
+    "driverId=bad",
+    "passengerId=bad",
+    "status=BAD",
+    "rideStatus=BAD",
+    "period=BAD",
+    "page=0",
+    "pageSize=101",
+    "minSeats=9",
+    "maxPriceKopecks=-1",
+    "sort=BAD",
+    "departureFrom=2099-11-10T00:00:00Z&departureTo=2099-11-09T00:00:00Z",
+  ])("проверяет параметры списка водителя %s", async (query) => {
+    await driverList(query).expect(400)
+  })
+  it("защищает список водителя ролью и сессией", async () => {
+    await request(app.getHttpServer()).get("/api/me/ride-bookings").expect(401)
+    await driverList("", 1).expect(403)
+    await driverList("", 3).expect(403)
+  })
+  it("скрывает сбой списка водителя за безопасным 503", async () => {
+    const spy = vi
+      .spyOn(prisma, "$transaction")
+      .mockRejectedValueOnce(new Error("private details"))
+    try {
+      expect((await driverList().expect(503)).body.message).toBe(
+        "Заявки временно недоступны"
+      )
+    } finally {
+      spy.mockRestore()
+    }
+  })
 })
