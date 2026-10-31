@@ -1,3 +1,4 @@
+import { NotificationsScreen } from "./Notifications"
 import { BookingsScreen } from "./Bookings"
 import { useEffect, useState } from "react"
 import { RidesScreen } from "./Rides"
@@ -71,6 +72,7 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
                 { path: "rides/new", label: "Создать поездку" },
               ]
             : []),
+          { path: "notifications", label: "Уведомления" },
           { path: "profile", label: "Мой профиль" },
           ...(user.roles.includes("PASSENGER") && !user.roles.includes("DRIVER")
             ? [{ path: "become-driver", label: "Стать водителем" }]
@@ -89,7 +91,9 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
           </a>
         ))}
       </nav>
-      {current === "ride-bookings" && user.roles.includes("DRIVER") ? (
+      {current === "notifications" ? (
+        <NotificationsScreen onExpired={onExpired} />
+      ) : current === "ride-bookings" && user.roles.includes("DRIVER") ? (
         <BookingsScreen key="driver-bookings" driver onExpired={onExpired} />
       ) : current === "bookings" && user.roles.includes("PASSENGER") ? (
         <BookingsScreen key="passenger-bookings" onExpired={onExpired} />

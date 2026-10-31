@@ -60,6 +60,8 @@ export class BookingsService {
           where: { id: rideId },
           include: {
             driver: { include: { user: { include: { roles: true } } } },
+            origin: { select: { name: true } },
+            destination: { select: { name: true } },
           },
         })
         if (
@@ -103,6 +105,21 @@ export class BookingsService {
           },
           select,
         })
+        const passenger = await tx.user.findUniqueOrThrow({
+          where: { id: passengerId },
+          select: { fullName: true },
+        })
+        await tx.notification.create({
+          data: {
+            userId: ride.driverId,
+            kind: "BOOKING_REQUEST",
+            title: "Новая заявка на поездку",
+            body: `${passenger.fullName}: ${ride.origin.name} → ${ride.destination.name}. Мест: ${booking.seats}. Ожидает вашего решения.`,
+            link: "#/ride-bookings",
+            resourceType: "booking",
+            resourceId: booking.id,
+          },
+        })
         return { booking, created: true }
       })
     } catch (error) {
@@ -145,13 +162,18 @@ export class BookingsService {
           )
         const ride = await tx.ride.findUniqueOrThrow({
           where: { id: locked[0]!.id },
-          select: { status: true, departureAt: true },
+          select: {
+            status: true,
+            departureAt: true,
+            origin: { select: { name: true } },
+            destination: { select: { name: true } },
+          },
         })
         if (ride.status !== "PUBLISHED" || ride.departureAt <= new Date())
           throw new ConflictException(
             "Решение возможно только до отправления опубликованной поездки"
           )
-        return tx.booking.update({
+        const updated = await tx.booking.update({
           where: { id },
           data: {
             status,
@@ -167,6 +189,22 @@ export class BookingsService {
           },
           select: { ...select, cancellationReason: true },
         })
+        await tx.notification.create({
+          data: {
+            userId: booking.passengerId,
+            kind:
+              status === "CONFIRMED" ? "BOOKING_CONFIRMED" : "BOOKING_REJECTED",
+            title:
+              status === "CONFIRMED"
+                ? "Заявка подтверждена"
+                : "Заявка отклонена",
+            body: `${ride.origin.name} → ${ride.destination.name}. Мест: ${booking.seats}.${reason ? ` Причина: ${reason}` : " Водитель подтвердил вашу заявку."}`,
+            link: "#/bookings",
+            resourceType: "booking",
+            resourceId: booking.id,
+          },
+        })
+        return updated
       })
     } catch (error) {
       if (error instanceof HttpException) throw error

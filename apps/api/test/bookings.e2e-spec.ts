@@ -15,6 +15,7 @@ import {
 } from "vitest"
 import { AppModule } from "../src/app.module.js"
 import { PrismaService } from "../src/prisma/prisma.service.js"
+import type { Prisma } from "../src/generated/prisma/client.js"
 import { configureApp } from "../src/setup.js"
 import type {
   BookingStatus,
@@ -93,6 +94,9 @@ describe("Создание заявки и решения водителя (HTTP
     ).id
   })
   beforeEach(async () => {
+    await prisma.notification.deleteMany({
+      where: { userId: { in: accounts.map((account) => account.id) } },
+    })
     await prisma.bookingStatusEvent.deleteMany({
       where: { booking: { rideId: { in: rides } } },
     })
@@ -1049,5 +1053,241 @@ describe("Создание заявки и решения водителя (HTTP
     } finally {
       spy.mockRestore()
     }
+  })
+  const notifications = (query = "", account = 1) =>
+    request(app.getHttpServer())
+      .get(`/api/notifications${query ? `?${query}` : ""}`)
+      .set("Cookie", accounts[account]!.cookie)
+  it("полный сценарий: поиск → карточка → заявка → уведомление водителю → подтверждение → кабинет пассажира", async () => {
+    await prisma.ride.update({
+      where: { id: rideId },
+      data: { conditions: `Поездка ${rideId}` },
+    })
+    const found = await request(app.getHttpServer())
+      .get(
+        `/api/rides?q=${rideId}&originDistrictId=${district}&date=2099-11-09&timeFrom=08:00&timeTo=09:00`
+      )
+      .expect(200)
+    expect(
+      found.body.items.some((ride: { id: string }) => ride.id === rideId)
+    ).toBe(true)
+    expect(
+      (
+        await request(app.getHttpServer())
+          .get(`/api/rides/${rideId}`)
+          .expect(200)
+      ).body.availableSeats
+    ).toBe(3)
+    const body = { seats: 2, requestKey: randomUUID() }
+    const created = await send(body).expect(201),
+      id = created.body.id
+    await send(body).expect(200)
+    const inbox = await notifications("kind=BOOKING_REQUEST", 0).expect(200)
+    expect(inbox.body.total).toBe(1)
+    expect(inbox.body.items[0]).toMatchObject({
+      resourceType: "booking",
+      resourceId: id,
+      link: "#/ride-bookings",
+      readAt: null,
+    })
+    expect(
+      (await driverList("status=PENDING").expect(200)).body.items[0].id
+    ).toBe(id)
+    await decide(id).expect(200)
+    await decide(id).expect(200)
+    const upcoming = await list("period=upcoming&status=CONFIRMED").expect(200)
+    expect(upcoming.body.items[0]).toMatchObject({
+      id,
+      seats: 2,
+      status: "CONFIRMED",
+      unitPriceKopecks: 15015,
+    })
+    const passengerInbox = await notifications("kind=BOOKING_CONFIRMED").expect(
+      200
+    )
+    expect(passengerInbox.body.total).toBe(1)
+    expect(passengerInbox.body.items[0]).toMatchObject({
+      resourceId: id,
+      link: "#/bookings",
+    })
+    expect(
+      (
+        await request(app.getHttpServer())
+          .get(`/api/rides/${rideId}`)
+          .expect(200)
+      ).body.availableSeats
+    ).toBe(1)
+    expect(await prisma.payment.count({ where: { bookingId: id } })).toBe(0)
+  })
+  it("уведомляет пассажира об отклонении с причиной без дублей", async () => {
+    const id = await pending(),
+      body = { reason: "Изменился маршрут" }
+    await decide(id, "reject", body).expect(200)
+    await decide(id, "reject", body).expect(200)
+    const inbox = await notifications("kind=BOOKING_REJECTED").expect(200)
+    expect(inbox.body.total).toBe(1)
+    expect(inbox.body.items[0].body).toContain(body.reason)
+    expect(inbox.body.items[0].resourceId).toBe(id)
+  })
+  const failNotificationWrite = () => {
+    const original = prisma.$transaction.bind(prisma)
+    return vi.spyOn(prisma, "$transaction").mockImplementationOnce(((
+      callback: (tx: Prisma.TransactionClient) => Promise<unknown>
+    ) =>
+      original(async (tx) => {
+        const proxy = new Proxy(tx, {
+          get(target, property, receiver) {
+            if (property === "notification")
+              return {
+                ...target.notification,
+                create: async () => {
+                  throw new Error("notification insert failed")
+                },
+              }
+            return Reflect.get(target, property, receiver)
+          },
+        })
+        return callback(proxy)
+      })) as typeof prisma.$transaction)
+  }
+  it("откатывает заявку, резерв и событие при ошибке записи уведомления", async () => {
+    const spy = failNotificationWrite()
+    try {
+      await send().expect(503)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(await prisma.booking.count({ where: { rideId } })).toBe(0)
+    expect(
+      await prisma.bookingStatusEvent.count({ where: { booking: { rideId } } })
+    ).toBe(0)
+    expect(
+      (
+        await request(app.getHttpServer())
+          .get(`/api/rides/${rideId}`)
+          .expect(200)
+      ).body.availableSeats
+    ).toBe(3)
+  })
+  it("откатывает решение и событие при ошибке уведомления пассажира", async () => {
+    const id = await pending(),
+      spy = failNotificationWrite()
+    try {
+      await decide(id).expect(503)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(
+      (await prisma.booking.findUniqueOrThrow({ where: { id } })).status
+    ).toBe("PENDING")
+    expect(
+      await prisma.bookingStatusEvent.count({ where: { bookingId: id } })
+    ).toBe(1)
+    expect(
+      (await notifications("kind=BOOKING_CONFIRMED").expect(200)).body.total
+    ).toBe(0)
+  })
+  async function inboxFixture() {
+    const rows = await prisma.notification.createManyAndReturn({
+      data: [
+        {
+          userId: accounts[1]!.id,
+          kind: "BOOKING_CONFIRMED",
+          title: "Заявка подтверждена",
+          body: "Уралмаш → УрФУ",
+          link: "#/bookings",
+          resourceType: "booking",
+          createdAt: new Date("2026-10-31T03:00:00Z"),
+        },
+        {
+          userId: accounts[1]!.id,
+          kind: "SYSTEM",
+          title: "Профиль",
+          body: "Настройки обновлены",
+          resourceType: "user",
+          readAt: new Date(),
+          createdAt: new Date("2026-10-30T03:00:00Z"),
+        },
+        {
+          userId: accounts[2]!.id,
+          kind: "SYSTEM",
+          title: "Чужое",
+          body: "Личное",
+        },
+      ],
+    })
+    return rows
+  }
+  it("фильтрует только свои уведомления и считает total до пагинации", async () => {
+    await inboxFixture()
+    const all = await notifications("pageSize=1").expect(200)
+    expect(all.body.total).toBe(2)
+    expect(all.body.items).toHaveLength(1)
+    const filtered = await notifications(
+      `q=${encodeURIComponent("уралмаш")}&kind=BOOKING_CONFIRMED&read=false&resourceType=booking&dateFrom=2026-10-31T08%3A00%3A00%2B05%3A00&dateTo=2026-10-31T08%3A00%3A00%2B05%3A00`
+    ).expect(200)
+    expect(filtered.body.total).toBe(1)
+    expect(filtered.body.items[0].title).toBe("Заявка подтверждена")
+    expect((await notifications("read=true").expect(200)).body.total).toBe(1)
+    expect((await notifications("page=99").expect(200)).body).toMatchObject({
+      items: [],
+      total: 2,
+    })
+    expect(JSON.stringify(all.body)).not.toContain('"userId"')
+  })
+  it("помечает своё уведомление прочитанным идемпотентно и не меняет чужое", async () => {
+    const rows = await inboxFixture(),
+      own = rows.find(
+        (row) => row.userId === accounts[1]!.id && row.readAt === null
+      )!,
+      other = rows.find((row) => row.userId === accounts[2]!.id)!
+    const read = (id: string) =>
+      request(app.getHttpServer())
+        .patch(`/api/notifications/${id}/read`)
+        .set("Cookie", accounts[1]!.cookie)
+        .set("Origin", origin)
+        .send({})
+    const [first, second] = await Promise.all([read(own.id), read(own.id)])
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(200)
+    expect(first.body.readAt).toBe(second.body.readAt)
+    await read(other.id).expect(404)
+    await read(randomUUID()).expect(404)
+    await read("bad").expect(400)
+    expect(
+      (await prisma.notification.findUniqueOrThrow({ where: { id: other.id } }))
+        .readAt
+    ).toBeNull()
+  })
+  it("защищает чтение сессией и изменение Origin, поддерживает все три роли", async () => {
+    const rows = await inboxFixture(),
+      id = rows[0]!.id
+    await request(app.getHttpServer()).get("/api/notifications").expect(401)
+    for (const account of [0, 1, 3])
+      await notifications("", account).expect(200)
+    await request(app.getHttpServer())
+      .patch(`/api/notifications/${id}/read`)
+      .set("Cookie", accounts[1]!.cookie)
+      .send({})
+      .expect(403)
+    await request(app.getHttpServer())
+      .patch(`/api/notifications/${id}/read`)
+      .set("Cookie", accounts[1]!.cookie)
+      .set("Origin", origin)
+      .send({ readAt: "2020-01-01" })
+      .expect(400)
+  })
+  it.each([
+    "kind=BAD",
+    "read=1",
+    "resourceType=BAD",
+    "page=0",
+    "pageSize=101",
+    "dateFrom=bad",
+    "dateFrom=2026-10-31T03:00:00",
+    "dateFrom=2026-11-01T00:00:00Z&dateTo=2026-10-31T00:00:00Z",
+    "userId=bad",
+  ])("проверяет параметры уведомлений %s", async (query) => {
+    await notifications(query).expect(400)
   })
 })
