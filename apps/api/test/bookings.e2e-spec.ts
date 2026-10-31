@@ -93,6 +93,10 @@ describe("Создание заявки и решения водителя (HTTP
     ).id
   })
   beforeEach(async () => {
+    await prisma.bookingStatusEvent.deleteMany({
+      where: { booking: { rideId: { in: rides } } },
+    })
+    await prisma.booking.deleteMany({ where: { rideId: { in: rides } } })
     rideId = (
       await prisma.ride.create({
         data: {
@@ -721,5 +725,187 @@ describe("Создание заявки и решения водителя (HTTP
     expect(
       await prisma.bookingStatusEvent.count({ where: { bookingId: id } })
     ).toBe(1)
+  })
+  async function listFixture() {
+    const upcomingId = await pending(2)
+    const rejected = await prisma.booking.create({
+      data: {
+        rideId,
+        passengerId: accounts[1]!.id,
+        requestKey: randomUUID(),
+        seats: 1,
+        unitPriceKopecks: 5000,
+        status: "REJECTED",
+        cancellationReason: "Не по пути",
+      },
+    })
+    const past = await prisma.ride.create({
+      data: {
+        driverId: driver,
+        vehicleId: vehicle,
+        originId: start,
+        destinationId: finish,
+        departureAt: new Date("2020-11-09T03:00:00Z"),
+        seatsTotal: 3,
+        priceKopecks: 9900,
+        status: "COMPLETED",
+      },
+    })
+    rides.push(past.id)
+    const completed = await prisma.booking.create({
+      data: {
+        rideId: past.id,
+        passengerId: accounts[1]!.id,
+        requestKey: randomUUID(),
+        seats: 3,
+        unitPriceKopecks: 0,
+        status: "COMPLETED",
+      },
+    })
+    await prisma.booking.create({
+      data: {
+        rideId,
+        passengerId: accounts[2]!.id,
+        requestKey: randomUUID(),
+        seats: 1,
+        unitPriceKopecks: 15015,
+      },
+    })
+    return { upcomingId, rejected: rejected.id, completed: completed.id }
+  }
+  const list = (query = "", account = 1) =>
+    request(app.getHttpServer())
+      .get(`/api/me/bookings${query ? `?${query}` : ""}`)
+      .set("Cookie", accounts[account]!.cookie)
+  it("список содержит только свои заявки, безопасные данные поездки и исходную цену", async () => {
+    const rows = await listFixture(),
+      result = await list().expect(200)
+    expect(result.headers["cache-control"]).toBe("no-store")
+    expect(result.body).toMatchObject({ total: 3, page: 1, pageSize: 20 })
+    expect(
+      result.body.items
+        .map((item: { id: string }) => item.id)
+        .sort((a: string, b: string) => a.localeCompare(b))
+    ).toEqual(
+      Object.values(rows).sort((a: string, b: string) => a.localeCompare(b))
+    )
+    const past = result.body.items.find(
+      (item: { id: string }) => item.id === rows.completed
+    )
+    expect(past).toMatchObject({
+      unitPriceKopecks: 0,
+      status: "COMPLETED",
+      ride: {
+        status: "COMPLETED",
+        origin: { name: "Уралмаш" },
+        destination: { name: "УрФУ" },
+        driver: { id: driver, fullName: "Анна Соколова" },
+      },
+    })
+    for (const field of [
+      "passwordHash",
+      "phone",
+      "registrationNumber",
+      "tokenHash",
+      "email",
+    ])
+      expect(JSON.stringify(result.body)).not.toContain(`"${field}"`)
+    expect((await list("", 2).expect(200)).body.total).toBe(1)
+  })
+  it("разделяет предстоящие поездки и историю без потери заявок", async () => {
+    const rows = await listFixture()
+    expect(
+      (await list("period=upcoming").expect(200)).body.items.map(
+        (item: { id: string }) => item.id
+      )
+    ).toEqual([rows.upcomingId])
+    expect((await list("period=history").expect(200)).body.total).toBe(2)
+    await prisma.ride.update({
+      where: { id: rideId },
+      data: { status: "CANCELLED" },
+    })
+    expect((await list("period=upcoming").expect(200)).body.total).toBe(0)
+    expect((await list("period=history").expect(200)).body.total).toBe(3)
+  })
+  it("объединяет фильтры статуса, поездки, мест, цены и времени через И", async () => {
+    const rows = await listFixture()
+    const result = await list(
+      "status=PENDING&rideStatus=PUBLISHED&minSeats=2&maxPriceKopecks=15015&departureFrom=2099-11-09T08%3A00%3A00%2B05%3A00&departureTo=2099-11-09T08%3A00%3A00%2B05%3A00"
+    ).expect(200)
+    expect(result.body.items.map((item: { id: string }) => item.id)).toEqual([
+      rows.upcomingId,
+    ])
+    expect(
+      (await list("status=PENDING&maxPriceKopecks=0").expect(200)).body.total
+    ).toBe(0)
+    expect((await list("maxPriceKopecks=0").expect(200)).body.items[0].id).toBe(
+      rows.completed
+    )
+  })
+  it.each(["уралмаш", "мира", "соколова", "kia", "rio", "Не по пути"])(
+    "ищет свои заявки по %s",
+    async (q) => {
+      await listFixture()
+      const result = await list(`q=${encodeURIComponent(q)}`).expect(200)
+      expect(result.body.total).toBe(q === "Не по пути" ? 1 : 3)
+    }
+  )
+  it("стабильно сортирует и считает total до пагинации", async () => {
+    const rows = await listFixture(),
+      ids: string[] = []
+    for (let page = 1; page <= 3; page++) {
+      const result = await list(
+        `pageSize=1&page=${page}&sort=departureAsc`
+      ).expect(200)
+      expect(result.body.total).toBe(3)
+      ids.push(result.body.items[0].id)
+    }
+    expect(new Set(ids).size).toBe(3)
+    expect(ids[0]).toBe(rows.completed)
+    expect(
+      (await list("pageSize=1&sort=departureDesc").expect(200)).body.items[0].id
+    ).not.toBe(rows.completed)
+    const empty = await list("page=99&pageSize=1").expect(200)
+    expect(empty.body).toMatchObject({
+      items: [],
+      total: 3,
+      page: 99,
+      pageSize: 1,
+    })
+  })
+  it.each([
+    "status=INVALID",
+    "rideStatus=INVALID",
+    "period=INVALID",
+    "page=0",
+    "pageSize=101",
+    "minSeats=9",
+    "minSeats=1.5",
+    "maxPriceKopecks=-1",
+    "departureFrom=bad",
+    "departureFrom=2099-11-09T08:00:00",
+    "departureFrom=2099-11-10T00:00:00Z&departureTo=2099-11-09T00:00:00Z",
+    "sort=bad",
+    "passengerId=bad",
+    "q=" + "x".repeat(101),
+  ])("проверяет параметры списка %s", async (query) => {
+    await list(query).expect(400)
+  })
+  it("защищает список сессией и ролью пассажира", async () => {
+    await request(app.getHttpServer()).get("/api/me/bookings").expect(401)
+    await list("", 3).expect(403)
+    const empty = await list().expect(200)
+    expect(empty.body.total).toBe(0)
+  })
+  it("возвращает безопасный 503 при ошибке чтения списка", async () => {
+    const spy = vi
+      .spyOn(prisma, "$transaction")
+      .mockRejectedValueOnce(new Error("private DB details"))
+    try {
+      const result = await list().expect(503)
+      expect(result.body.message).toBe("Заявки временно недоступны")
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

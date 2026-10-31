@@ -1,3 +1,4 @@
+import { BookingsScreen } from "./Bookings"
 import { useEffect, useState } from "react"
 import { RidesScreen } from "./Rides"
 import { RideEditor } from "./RideEditor"
@@ -18,7 +19,7 @@ const destinations = [
     label: "Кабинет пассажира",
     role: "PASSENGER",
     description:
-      "Здесь появятся предстоящие поездки, история бронирований и отзывы.",
+      "Предстоящие поездки и история доступны в разделе «Мои заявки».",
   },
   {
     path: "driver",
@@ -59,6 +60,9 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
         </p>
         {[
           ...available,
+          ...(user.roles.includes("PASSENGER")
+            ? [{ path: "bookings", label: "Мои заявки" }]
+            : []),
           ...(user.roles.includes("DRIVER")
             ? [
                 { path: "rides", label: "Мои поездки" },
@@ -84,7 +88,9 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
           </a>
         ))}
       </nav>
-      {current === "profile" ? (
+      {current === "bookings" && user.roles.includes("PASSENGER") ? (
+        <BookingsScreen onExpired={onExpired} />
+      ) : current === "profile" ? (
         <ProfileScreen onSaved={onSaved} onExpired={onExpired} />
       ) : current === "vehicles" && user.roles.includes("DRIVER") ? (
         <VehiclesScreen onExpired={onExpired} />
@@ -129,6 +135,13 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
                 Заявки пассажиров и статистика появятся позже.
               </p>
             </div>
+          ) : destination.path === "passenger" ? (
+            <a
+              href="#/bookings"
+              className="mt-6 inline-block font-medium underline underline-offset-4"
+            >
+              Открыть мои заявки
+            </a>
           ) : (
             <div className="mt-6 rounded-xl border border-dashed p-5">
               <p className="text-sm font-medium">Раздел в разработке</p>

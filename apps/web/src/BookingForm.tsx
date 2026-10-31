@@ -158,6 +158,12 @@ export function BookingForm({
           <p>
             Стоимость заявки: {money(booking.seats * booking.unitPriceKopecks)}
           </p>
+          <a
+            href="#/bookings"
+            className="inline-block font-medium underline underline-offset-4"
+          >
+            Открыть мои заявки
+          </a>
           <p className="text-sm break-all text-muted-foreground">
             Номер заявки: {booking.id}
           </p>
