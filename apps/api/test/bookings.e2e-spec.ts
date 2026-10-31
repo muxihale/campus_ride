@@ -22,7 +22,7 @@ import type {
 } from "../src/generated/prisma/enums.js"
 const domain = `${randomUUID()}.bookings.campusride.test`
 const origin = "http://localhost:5173"
-describe("Создание заявки (HTTP + PostgreSQL)", () => {
+describe("Создание заявки и решения водителя (HTTP + PostgreSQL)", () => {
   let app: INestApplication, prisma: PrismaService
   let driver: string,
     vehicle: string,
@@ -190,7 +190,9 @@ describe("Создание заявки (HTTP + PostgreSQL)", () => {
   it("конкурирующие повторы одного ключа создают одну заявку", async () => {
     const body = { seats: 2, requestKey: randomUUID() }
     const results = await Promise.all([send(body), send(body)])
-    expect(results.map((r) => r.status).sort()).toEqual([200, 201])
+    expect(results.map((r) => r.status).sort((a, b) => a - b)).toEqual([
+      200, 201,
+    ])
     expect(results[0]!.body.id).toBe(results[1]!.body.id)
     expect(await prisma.booking.count({ where: { rideId } })).toBe(1)
   })
@@ -199,7 +201,9 @@ describe("Создание заявки (HTTP + PostgreSQL)", () => {
       send({ seats: 2, requestKey: randomUUID() }, 1),
       send({ seats: 2, requestKey: randomUUID() }, 2),
     ])
-    expect(results.map((r) => r.status).sort()).toEqual([201, 409])
+    expect(results.map((r) => r.status).sort((a, b) => a - b)).toEqual([
+      201, 409,
+    ])
     expect(
       (
         await prisma.booking.aggregate({
@@ -211,7 +215,9 @@ describe("Создание заявки (HTTP + PostgreSQL)", () => {
   })
   it("не допускает две активные заявки одного пассажира с разными ключами", async () => {
     const results = await Promise.all([send(), send()])
-    expect(results.map((r) => r.status).sort()).toEqual([201, 409])
+    expect(results.map((r) => r.status).sort((a, b) => a - b)).toEqual([
+      201, 409,
+    ])
   })
   it("запрещает повторный ключ с другим количеством мест или пассажиром", async () => {
     const requestKey = randomUUID()
@@ -424,5 +430,296 @@ describe("Создание заявки (HTTP + PostgreSQL)", () => {
     } finally {
       spy.mockRestore()
     }
+  })
+  const pending = async (seats = 2) =>
+    (await send({ seats, requestKey: randomUUID() }).expect(201)).body
+      .id as string
+  const decide = (
+    id: string,
+    action = "confirm",
+    body: object = {},
+    account = 0
+  ) =>
+    request(app.getHttpServer())
+      .post(`/api/bookings/${id}/${action}`)
+      .set("Origin", origin)
+      .set("Cookie", accounts[account]!.cookie)
+      .send(body)
+  it("водитель подтверждает заявку, сохраняет резерв и фиксирует событие", async () => {
+    const id = await pending()
+    const result = await decide(id).expect(200)
+    expect(result.headers["cache-control"]).toBe("no-store")
+    expect(result.body).toMatchObject({
+      id,
+      rideId,
+      status: "CONFIRMED",
+      seats: 2,
+      unitPriceKopecks: 15015,
+      cancellationReason: null,
+    })
+    expect(
+      (
+        await request(app.getHttpServer())
+          .get(`/api/rides/${rideId}`)
+          .expect(200)
+      ).body.availableSeats
+    ).toBe(1)
+    const events = await prisma.bookingStatusEvent.findMany({
+      where: { bookingId: id, toStatus: "CONFIRMED" },
+    })
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      fromStatus: "PENDING",
+      actorId: driver,
+      reason: null,
+    })
+    expect(await prisma.payment.count({ where: { bookingId: id } })).toBe(0)
+  })
+  it("отклонение освобождает все места и сохраняет нормализованную причину", async () => {
+    const id = await pending(3)
+    await request(app.getHttpServer()).get(`/api/rides/${rideId}`).expect(404)
+    const result = await decide(id, "reject", {
+      reason: "  Не смогу забрать у метро  ",
+    }).expect(200)
+    expect(result.body).toMatchObject({
+      status: "REJECTED",
+      cancellationReason: "Не смогу забрать у метро",
+    })
+    expect(
+      (
+        await request(app.getHttpServer())
+          .get(`/api/rides/${rideId}`)
+          .expect(200)
+      ).body.availableSeats
+    ).toBe(3)
+    expect(
+      await prisma.bookingStatusEvent.findFirst({
+        where: { bookingId: id, toStatus: "REJECTED" },
+      })
+    ).toMatchObject({
+      fromStatus: "PENDING",
+      actorId: driver,
+      reason: "Не смогу забрать у метро",
+    })
+    await send({ seats: 3, requestKey: randomUUID() }).expect(201)
+  })
+  it.each(["confirm", "reject"])(
+    "повтор %s идемпотентен, включая одновременные запросы",
+    async (action) => {
+      const id = await pending(),
+        body = action === "reject" ? { reason: "Изменился маршрут" } : {}
+      const results = await Promise.all([
+        decide(id, action, body),
+        decide(id, action, body),
+      ])
+      expect(results.map((result) => result.status)).toEqual([200, 200])
+      expect(results[0]!.body).toEqual(results[1]!.body)
+      expect(
+        await prisma.bookingStatusEvent.count({ where: { bookingId: id } })
+      ).toBe(2)
+      await prisma.ride.update({
+        where: { id: rideId },
+        data: { status: "COMPLETED" },
+      })
+      await decide(id, action, body).expect(200)
+      expect(
+        await prisma.bookingStatusEvent.count({ where: { bookingId: id } })
+      ).toBe(2)
+    }
+  )
+  it("не меняет уже сохранённую причину отклонения", async () => {
+    const id = await pending()
+    await decide(id, "reject", { reason: "Изменился маршрут" }).expect(200)
+    await decide(id, "reject", { reason: "Другая причина" }).expect(409)
+    expect(
+      (await prisma.booking.findUniqueOrThrow({ where: { id } }))
+        .cancellationReason
+    ).toBe("Изменился маршрут")
+    expect(
+      await prisma.bookingStatusEvent.count({ where: { bookingId: id } })
+    ).toBe(2)
+  })
+  it("при гонке подтверждения и отклонения принимает ровно одно решение", async () => {
+    const id = await pending()
+    const results = await Promise.all([
+      decide(id),
+      decide(id, "reject", { reason: "Изменился маршрут" }),
+    ])
+    expect(
+      results.map((result) => result.status).sort((a, b) => a - b)
+    ).toEqual([200, 409])
+    const row = await prisma.booking.findUniqueOrThrow({ where: { id } })
+    expect(["CONFIRMED", "REJECTED"]).toContain(row.status)
+    expect(
+      await prisma.bookingStatusEvent.count({ where: { bookingId: id } })
+    ).toBe(2)
+  })
+  it("сериализует освобождение мест с новой заявкой", async () => {
+    const id = await pending(3),
+      body = { seats: 3, requestKey: randomUUID() }
+    const [rejection, creation] = await Promise.all([
+      decide(id, "reject", { reason: "Изменился маршрут" }),
+      send(body, 2),
+    ])
+    expect(rejection.status).toBe(200)
+    expect([201, 409]).toContain(creation.status)
+    if (creation.status === 409) await send(body, 2).expect(201)
+    expect(
+      (
+        await prisma.booking.aggregate({
+          where: { rideId, status: { in: ["PENDING", "CONFIRMED"] } },
+          _sum: { seats: true },
+        })
+      )._sum.seats
+    ).toBe(3)
+  })
+  it.each(["CANCELLED", "COMPLETED"] as BookingStatus[])(
+    "не принимает решения по %s",
+    async (status) => {
+      const id = await pending()
+      await prisma.booking.update({ where: { id }, data: { status } })
+      await decide(id).expect(409)
+      await decide(id, "reject", { reason: "Изменился маршрут" }).expect(409)
+      expect(
+        await prisma.bookingStatusEvent.count({ where: { bookingId: id } })
+      ).toBe(1)
+    }
+  )
+  it("не отклоняет подтверждённую и не подтверждает отклонённую заявку", async () => {
+    const id = await pending()
+    await decide(id).expect(200)
+    await decide(id, "reject", { reason: "Изменился маршрут" }).expect(409)
+    const second = (
+      await send({ seats: 1, requestKey: randomUUID() }, 2).expect(201)
+    ).body.id
+    await decide(second, "reject", { reason: "Изменился маршрут" }).expect(200)
+    await decide(second).expect(409)
+  })
+  it.each(["DRAFT", "IN_PROGRESS", "COMPLETED", "CANCELLED"] as RideStatus[])(
+    "запрещает новое решение для поездки %s",
+    async (status) => {
+      const id = await pending()
+      await prisma.ride.update({ where: { id: rideId }, data: { status } })
+      await decide(id).expect(409)
+      await decide(id, "reject", { reason: "Изменился маршрут" }).expect(409)
+      expect(
+        (await prisma.booking.findUniqueOrThrow({ where: { id } })).status
+      ).toBe("PENDING")
+    }
+  )
+  it("запрещает решение после времени отправления", async () => {
+    const id = await pending()
+    await prisma.ride.update({
+      where: { id: rideId },
+      data: { departureAt: new Date("2020-01-01") },
+    })
+    await decide(id).expect(409)
+    await decide(id, "reject", { reason: "Изменился маршрут" }).expect(409)
+  })
+  it.each(["confirm", "reject"])(
+    "проверяет сессию, роль, Origin и владение для %s",
+    async (action) => {
+      const id = await pending(),
+        body = action === "reject" ? { reason: "Изменился маршрут" } : {},
+        path = `/api/bookings/${id}/${action}`
+      await request(app.getHttpServer())
+        .post(path)
+        .set("Origin", origin)
+        .send(body)
+        .expect(401)
+      await decide(id, action, body, 1).expect(403)
+      await decide(id, action, body, 3).expect(403)
+      await request(app.getHttpServer())
+        .post(path)
+        .set("Cookie", accounts[0]!.cookie)
+        .send(body)
+        .expect(403)
+      await request(app.getHttpServer())
+        .post(path)
+        .set("Cookie", accounts[0]!.cookie)
+        .set("Origin", "https://other.test")
+        .send(body)
+        .expect(403)
+      await prisma.userRole.create({
+        data: { userId: accounts[2]!.id, role: "DRIVER" },
+      })
+      try {
+        await decide(id, action, body, 2).expect(404)
+      } finally {
+        await prisma.userRole.delete({
+          where: { userId_role: { userId: accounts[2]!.id, role: "DRIVER" } },
+        })
+      }
+      await decide(randomUUID(), action, body).expect(404)
+      await decide("bad", action, body).expect(400)
+      expect(
+        (await prisma.booking.findUniqueOrThrow({ where: { id } })).status
+      ).toBe("PENDING")
+    }
+  )
+  it("учитывает блокировку и отзыв роли водителя", async () => {
+    const id = await pending()
+    await prisma.user.update({
+      where: { id: driver },
+      data: { status: "BLOCKED" },
+    })
+    try {
+      await decide(id).expect(401)
+    } finally {
+      await prisma.user.update({
+        where: { id: driver },
+        data: { status: "ACTIVE" },
+      })
+    }
+    await prisma.userRole.delete({
+      where: { userId_role: { userId: driver, role: "DRIVER" } },
+    })
+    try {
+      await decide(id).expect(403)
+    } finally {
+      await prisma.userRole.create({ data: { userId: driver, role: "DRIVER" } })
+    }
+  })
+  it.each([
+    {},
+    { reason: "" },
+    { reason: "   " },
+    { reason: null },
+    { reason: 42 },
+    { reason: "x".repeat(501) },
+    { reason: "Причина", status: "CONFIRMED" },
+  ])("проверяет причину отклонения %j", async (body) => {
+    const id = await pending()
+    await decide(id, "reject", body).expect(400)
+    expect(
+      (await prisma.booking.findUniqueOrThrow({ where: { id } })).status
+    ).toBe("PENDING")
+  })
+  it("подтверждение не принимает поля клиента и допускает пустое тело", async () => {
+    const id = await pending()
+    await decide(id, "confirm", { status: "CONFIRMED" }).expect(400)
+    await request(app.getHttpServer())
+      .post(`/api/bookings/${id}/confirm`)
+      .set("Origin", origin)
+      .set("Cookie", accounts[0]!.cookie)
+      .expect(200)
+  })
+  it("безопасно обрабатывает сбой транзакции решения", async () => {
+    const id = await pending(),
+      spy = vi
+        .spyOn(prisma, "$transaction")
+        .mockRejectedValueOnce(new Error("private database details"))
+    try {
+      const result = await decide(id).expect(503)
+      expect(result.body.message).toBe("Решение по заявке временно недоступно")
+    } finally {
+      spy.mockRestore()
+    }
+    expect(
+      (await prisma.booking.findUniqueOrThrow({ where: { id } })).status
+    ).toBe("PENDING")
+    expect(
+      await prisma.bookingStatusEvent.count({ where: { bookingId: id } })
+    ).toBe(1)
   })
 })

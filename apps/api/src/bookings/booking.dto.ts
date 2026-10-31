@@ -1,5 +1,6 @@
 import { ApiProperty } from "@nestjs/swagger"
-import { IsInt, IsUUID, Max, Min } from "class-validator"
+import { Transform } from "class-transformer"
+import { IsInt, IsUUID, IsString, Length, Max, Min } from "class-validator"
 import { BookingStatus } from "../generated/prisma/enums.js"
 export class CreateBookingDto {
   @ApiProperty({ type: Number, minimum: 1, maximum: 8 })
@@ -37,4 +38,28 @@ export class BookingDto {
   status!: BookingStatus
   @ApiProperty({ type: String, format: "date-time" })
   createdAt!: Date
+}
+
+export class ConfirmBookingDto {}
+export class RejectBookingDto {
+  @ApiProperty({
+    type: String,
+    minLength: 1,
+    maxLength: 500,
+    description: "Причина отклонения",
+  })
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === "string" ? value.trim() : value
+  )
+  @IsString()
+  @Length(1, 500)
+  reason!: string
+}
+export class BookingDecisionDto extends BookingDto {
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: "Причина отклонения, иначе null",
+  })
+  cancellationReason!: string | null
 }

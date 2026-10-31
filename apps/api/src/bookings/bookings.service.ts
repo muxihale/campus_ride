@@ -9,7 +9,11 @@ import {
 } from "@nestjs/common"
 import { PrismaService } from "../prisma/prisma.service.js"
 import { Prisma } from "../generated/prisma/client.js"
-import type { BookingDto, CreateBookingDto } from "./booking.dto.js"
+import type {
+  BookingDecisionDto,
+  BookingDto,
+  CreateBookingDto,
+} from "./booking.dto.js"
 const select = {
   id: true,
   rideId: true,
@@ -109,6 +113,66 @@ export class BookingsService {
       )
         throw new ConflictException("Заявка или ключ запроса уже существуют")
       throw new ServiceUnavailableException("Бронирование временно недоступно")
+    }
+  }
+  async decide(
+    driverId: string,
+    id: string,
+    status: "CONFIRMED" | "REJECTED",
+    reason: string | null
+  ): Promise<BookingDecisionDto> {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        // Сначала блокируется поездка, как и при создании заявки.
+        const locked = await tx.$queryRaw<
+          { id: string }[]
+        >`SELECT r."id" FROM "Ride" r JOIN "Booking" b ON b."rideId" = r."id" WHERE b."id" = ${id}::uuid AND r."driverId" = ${driverId}::uuid FOR UPDATE OF r`
+        if (!locked.length) throw new NotFoundException("Заявка не найдена")
+        const booking = await tx.booking.findUniqueOrThrow({
+          where: { id },
+          select: { ...select, cancellationReason: true },
+        })
+        if (booking.status === status) {
+          if (status === "REJECTED" && booking.cancellationReason !== reason)
+            throw new ConflictException(
+              "Заявка уже отклонена с другой причиной"
+            )
+          return booking
+        }
+        if (booking.status !== "PENDING")
+          throw new ConflictException(
+            "Решение возможно только для ожидающей заявки"
+          )
+        const ride = await tx.ride.findUniqueOrThrow({
+          where: { id: locked[0]!.id },
+          select: { status: true, departureAt: true },
+        })
+        if (ride.status !== "PUBLISHED" || ride.departureAt <= new Date())
+          throw new ConflictException(
+            "Решение возможно только до отправления опубликованной поездки"
+          )
+        return tx.booking.update({
+          where: { id },
+          data: {
+            status,
+            cancellationReason: reason,
+            statusEvents: {
+              create: {
+                actorId: driverId,
+                fromStatus: "PENDING",
+                toStatus: status,
+                reason,
+              },
+            },
+          },
+          select: { ...select, cancellationReason: true },
+        })
+      })
+    } catch (error) {
+      if (error instanceof HttpException) throw error
+      throw new ServiceUnavailableException(
+        "Решение по заявке временно недоступно"
+      )
     }
   }
 }
