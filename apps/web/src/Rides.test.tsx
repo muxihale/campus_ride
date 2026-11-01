@@ -305,3 +305,59 @@ describe("Свои поездки и публикация", () => {
     ).toBeTruthy()
   })
 })
+
+it("отменяет поездку с причиной и предупреждением о полном демо-возврате", async () => {
+  start({ items: [{ ...ride, status: "PUBLISHED" }] })
+  await screen.findByText("Найдено поездок: 1")
+  const original = fetchMock.getMockImplementation()!
+  fetchMock.mockImplementation(async (url, init) => {
+    if (String(url).endsWith("/cancel"))
+      return response({
+        id: ride.id,
+        status: "CANCELLED",
+        cancellationReason: "Автомобиль в ремонте",
+      })
+    if (String(url).startsWith("/api/me/rides?"))
+      return response({
+        items: [
+          {
+            ...ride,
+            status: "CANCELLED",
+            cancellationReason: "Автомобиль в ремонте",
+          },
+        ],
+        total: 1,
+        page: 1,
+        pageSize: 10,
+      })
+    return original(url, init)
+  })
+  await userEvent.click(
+    screen.getByRole("button", { name: "Отменить поездку" })
+  )
+  expect(
+    screen.getByRole("heading", { name: "Отменить поездку?" })
+  ).toBeTruthy()
+  await userEvent.click(
+    screen.getByRole("button", { name: "Подтвердить отмену поездки" })
+  )
+  expect(screen.getByRole("alert").textContent).toContain("Укажите причину")
+  await userEvent.type(
+    screen.getByLabelText("Причина отмены поездки"),
+    "Автомобиль в ремонте"
+  )
+  await userEvent.click(
+    screen.getByRole("button", { name: "Подтвердить отмену поездки" })
+  )
+  expect(
+    await screen.findByText("Причина отмены: Автомобиль в ремонте")
+  ).toBeTruthy()
+  const call = fetchMock.mock.calls.find(([url]) =>
+    String(url).endsWith("/cancel")
+  )!
+  expect(call[1]?.method).toBe("POST")
+  expect(JSON.parse(String(call[1]?.body))).toEqual({
+    reason: "Автомобиль в ремонте",
+  })
+  expect(screen.queryByRole("button", { name: "Отменить поездку" })).toBeNull()
+})

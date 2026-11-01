@@ -69,7 +69,7 @@ export class BookingDecisionsController {
   @ApiOperation({
     summary: "Подтвердить ожидающую заявку своей поездки",
     description:
-      "PENDING → CONFIRMED до отправления. Резерв мест сохраняется. Повтор не создаёт новое событие. Платёж добавляется отдельным этапом.",
+      "PENDING → CONFIRMED до отправления. Резерв мест сохраняется. Повтор не создаёт новое событие. Демонстрационная оплата выполняется атомарно с подтверждением; реальные деньги не используются.",
   })
   @ApiBody({ type: ConfirmBookingDto, required: false })
   @ApiOkResponse({ type: BookingDecisionDto })

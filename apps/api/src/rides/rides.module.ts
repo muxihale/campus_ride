@@ -1,3 +1,5 @@
+import { RideCancellationController } from "./ride-cancellation.controller.js"
+import { RideCancellationService } from "./ride-cancellation.service.js"
 import { Module } from "@nestjs/common"
 import { AuthModule } from "../auth/auth.module.js"
 import { TrustedOriginGuard } from "../auth/trusted-origin.guard.js"
@@ -10,7 +12,17 @@ import { RidesService } from "./rides.service.js"
 
 @Module({
   imports: [AuthModule, PrismaModule],
-  controllers: [RidesController, OwnRidesController, PublicSearchController],
-  providers: [RidesService, PublicSearchService, TrustedOriginGuard],
+  controllers: [
+    RidesController,
+    OwnRidesController,
+    PublicSearchController,
+    RideCancellationController,
+  ],
+  providers: [
+    RidesService,
+    PublicSearchService,
+    RideCancellationService,
+    TrustedOriginGuard,
+  ],
 })
 export class RidesModule {}

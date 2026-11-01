@@ -1,9 +1,11 @@
+import { PaymentInfo, type DemoPayment } from "./PaymentInfo"
 import { useEffect, useRef, useState, type FormEvent } from "react"
 import { Button } from "@workspace/ui/components/button"
 import { ApiError, apiRequest, type User } from "./auth"
 import type { PublicRideDetail } from "./PublicRide"
 import { kopecksToRubles } from "./ride-form"
 type Booking = {
+  payment?: DemoPayment | null
   id: string
   rideId: string
   passengerId: string
@@ -154,6 +156,7 @@ export function BookingForm({
               }[booking.status]
             }
           </p>
+          <PaymentInfo payment={booking.payment} />
           <p>Мест в заявке: {booking.seats}</p>
           <p>
             Стоимость заявки: {money(booking.seats * booking.unitPriceKopecks)}
@@ -198,7 +201,8 @@ export function BookingForm({
           </p>
           <p className="text-sm text-muted-foreground">
             Места резервируются сразу. Для поездки нужно подтверждение водителя.
-            Оплата пока не выполняется.
+            Оплата при подтверждении и возврат при отмене — демонстрационные,
+            реальные деньги не используются.
           </p>
           {uncertain && (
             <p className="text-sm">

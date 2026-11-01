@@ -1,3 +1,5 @@
+import { cancelReservation } from "./cancellation.js"
+import { changePayment, paymentSelect, serializePayment } from "./payment.js"
 import {
   ConflictException,
   ForbiddenException,
@@ -15,6 +17,7 @@ import type {
   CreateBookingDto,
 } from "./booking.dto.js"
 const select = {
+  payment: { select: paymentSelect },
   id: true,
   rideId: true,
   passengerId: true,
@@ -54,7 +57,13 @@ export class BookingsService {
             throw new ConflictException(
               "Ключ запроса уже использован для другой заявки"
             )
-          return { booking: previous, created: false }
+          return {
+            booking: {
+              ...previous,
+              payment: serializePayment(previous.payment),
+            },
+            created: false,
+          }
         }
         const ride = await tx.ride.findUniqueOrThrow({
           where: { id: rideId },
@@ -99,6 +108,13 @@ export class BookingsService {
             seats: input.seats,
             unitPriceKopecks: ride.priceKopecks,
             status: "PENDING",
+            payment: {
+              create: {
+                amountKopecks: BigInt(input.seats) * BigInt(ride.priceKopecks),
+                isDemo: true,
+                status: "PENDING",
+              },
+            },
             statusEvents: {
               create: { actorId: passengerId, toStatus: "PENDING" },
             },
@@ -120,7 +136,10 @@ export class BookingsService {
             resourceId: booking.id,
           },
         })
-        return { booking, created: true }
+        return {
+          booking: { ...booking, payment: serializePayment(booking.payment) },
+          created: true,
+        }
       })
     } catch (error) {
       if (error instanceof HttpException) throw error
@@ -154,7 +173,7 @@ export class BookingsService {
             throw new ConflictException(
               "Заявка уже отклонена с другой причиной"
             )
-          return booking
+          return { ...booking, payment: serializePayment(booking.payment) }
         }
         if (booking.status !== "PENDING")
           throw new ConflictException(
@@ -173,6 +192,12 @@ export class BookingsService {
           throw new ConflictException(
             "Решение возможно только до отправления опубликованной поездки"
           )
+        await changePayment(
+          tx,
+          id,
+          status === "CONFIRMED" ? "SUCCEEDED" : "CANCELLED",
+          driverId
+        )
         const updated = await tx.booking.update({
           where: { id },
           data: {
@@ -204,13 +229,57 @@ export class BookingsService {
             resourceId: booking.id,
           },
         })
-        return updated
+        return { ...updated, payment: serializePayment(updated.payment) }
       })
     } catch (error) {
       if (error instanceof HttpException) throw error
       throw new ServiceUnavailableException(
         "Решение по заявке временно недоступно"
       )
+    }
+  }
+  async cancel(
+    passengerId: string,
+    id: string,
+    reason: string | null
+  ): Promise<BookingDecisionDto> {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const locked = await tx.$queryRaw<
+          { id: string }[]
+        >`SELECT r."id" FROM "Ride" r JOIN "Booking" b ON b."rideId" = r."id" WHERE b."id" = ${id}::uuid AND b."passengerId" = ${passengerId}::uuid FOR UPDATE OF r`
+        if (!locked.length) throw new NotFoundException("Заявка не найдена")
+        const booking = await tx.booking.findUniqueOrThrow({
+          where: { id },
+          select: { ...select, cancellationReason: true },
+        })
+        if (booking.status === "CANCELLED")
+          return { ...booking, payment: serializePayment(booking.payment) }
+        if (!["PENDING", "CONFIRMED"].includes(booking.status))
+          throw new ConflictException(
+            "Отмена недоступна для этого статуса заявки"
+          )
+        const ride = await tx.ride.findUniqueOrThrow({
+          where: { id: locked[0]!.id },
+        })
+        if (
+          ride.status !== "PUBLISHED" ||
+          ride.startedAt ||
+          ride.departureAt <= new Date()
+        )
+          throw new ConflictException(
+            "Отменить заявку можно только до отправления опубликованной поездки"
+          )
+        await cancelReservation(tx, booking, passengerId, reason, ride.driverId)
+        const updated = await tx.booking.findUniqueOrThrow({
+          where: { id },
+          select: { ...select, cancellationReason: true },
+        })
+        return { ...updated, payment: serializePayment(updated.payment) }
+      })
+    } catch (error) {
+      if (error instanceof HttpException) throw error
+      throw new ServiceUnavailableException("Отмена заявки временно недоступна")
     }
   }
 }

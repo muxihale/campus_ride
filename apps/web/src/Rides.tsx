@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useRef, useState, type FormEvent } from "react"
 import { Button } from "@workspace/ui/components/button"
 import { ApiError, apiRequest } from "./auth"
 import {
@@ -52,9 +52,11 @@ export function RidesScreen({ onExpired }: { onExpired: () => void }) {
   const [page, setPage] = useState(1)
   const [revision, setRevision] = useState(0)
   const [command, setCommand] = useState<{
-    kind: "publish" | "delete"
+    kind: "publish" | "delete" | "cancel"
     ride: Ride
   } | null>(null)
+  const [reason, setReason] = useState("")
+  const busy = useRef(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState("")
   const [notice, setNotice] = useState("")
@@ -184,27 +186,44 @@ export function RidesScreen({ onExpired }: { onExpired: () => void }) {
     setPage(1)
     setError("")
   }
-  function open(kind: "publish" | "delete", ride: Ride) {
+  function open(kind: "publish" | "delete" | "cancel", ride: Ride) {
     setCommand({ kind, ride })
+    setReason("")
     setError("")
     setNotice("")
   }
   async function execute() {
-    if (!command || pending) return
+    if (!command || busy.current) return
+    if (
+      command.kind === "cancel" &&
+      (!reason.trim() || reason.trim().length > 500)
+    ) {
+      setError("Укажите причину от 1 до 500 символов")
+      return
+    }
+    busy.current = true
     setPending(true)
     setError("")
     try {
       await apiRequest(
         command.kind === "publish"
           ? `rides/${command.ride.id}/publish`
-          : `rides/${command.ride.id}`,
-        command.kind === "publish" ? "POST" : "DELETE",
-        command.kind === "publish" ? {} : undefined
+          : command.kind === "cancel"
+            ? `rides/${command.ride.id}/cancel`
+            : `rides/${command.ride.id}`,
+        command.kind !== "delete" ? "POST" : "DELETE",
+        command.kind === "publish"
+          ? {}
+          : command.kind === "cancel"
+            ? { reason: reason.trim() }
+            : undefined
       )
       setNotice(
         command.kind === "publish"
           ? "Поездка опубликована."
-          : "Черновик удалён."
+          : command.kind === "cancel"
+            ? "Поездка отменена. Активные заявки отменены, выполнены полные демо-возвраты."
+            : "Черновик удалён."
       )
       setCommand(null)
       setRevision((value) => value + 1)
@@ -216,11 +235,16 @@ export function RidesScreen({ onExpired }: { onExpired: () => void }) {
             ? cause.message
             : "Не удалось выполнить действие"
         )
-        setCommand(null)
+        if (
+          command.kind !== "cancel" ||
+          (cause instanceof ApiError && [404, 409].includes(cause.status))
+        )
+          setCommand(null)
         if (cause instanceof ApiError && [404, 409].includes(cause.status))
           setRevision((value) => value + 1)
       }
     } finally {
+      busy.current = false
       setPending(false)
     }
   }
@@ -421,7 +445,9 @@ export function RidesScreen({ onExpired }: { onExpired: () => void }) {
           >
             {command.kind === "publish"
               ? "Опубликовать поездку?"
-              : "Удалить черновик?"}
+              : command.kind === "cancel"
+                ? "Отменить поездку?"
+                : "Удалить черновик?"}
           </h2>
           <p className="text-sm">
             {routeName(command.ride)} ·{" "}
@@ -430,15 +456,31 @@ export function RidesScreen({ onExpired }: { onExpired: () => void }) {
           <p className="text-sm text-muted-foreground">
             {command.kind === "publish"
               ? "После публикации редактирование и удаление черновика будут недоступны."
-              : "Черновик будет удалён вместе с остановками."}
+              : command.kind === "cancel"
+                ? "Все активные заявки будут отменены. Успешные демонстрационные платежи полностью возвращаются. Реальные деньги не используются."
+                : "Черновик будет удалён вместе с остановками."}
           </p>
+          {command.kind === "cancel" && (
+            <label className="block text-sm font-medium">
+              Причина отмены поездки
+              <textarea
+                className={`${inputClass} min-h-24 py-3`}
+                maxLength={500}
+                disabled={pending}
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+              />
+            </label>
+          )}
           <div className="flex flex-wrap gap-3">
             <Button disabled={pending} onClick={() => void execute()}>
               {pending
                 ? "Подождите…"
                 : command.kind === "publish"
                   ? "Подтвердить публикацию"
-                  : "Удалить окончательно"}
+                  : command.kind === "cancel"
+                    ? "Подтвердить отмену поездки"
+                    : "Удалить окончательно"}
             </Button>
             <Button
               variant="outline"
@@ -517,6 +559,11 @@ export function RidesScreen({ onExpired }: { onExpired: () => void }) {
                           {rideStatusNames[ride.status] ?? ride.status}
                         </span>
                       </div>
+                      {ride.cancellationReason && (
+                        <p className="text-sm break-words">
+                          Причина отмены: {ride.cancellationReason}
+                        </p>
+                      )}
                       <p className="text-sm">
                         {ekaterinburgInput(ride.departureAt).replace("T", " ")}{" "}
                         · Екатеринбург
@@ -549,6 +596,15 @@ export function RidesScreen({ onExpired }: { onExpired: () => void }) {
                             .map((stop) => locationName(stop.locationId))
                             .join(" → ")}
                         </p>
+                      )}
+                      {["DRAFT", "PUBLISHED"].includes(ride.status) && (
+                        <Button
+                          variant="outline"
+                          disabled={pending || command !== null}
+                          onClick={() => open("cancel", ride)}
+                        >
+                          Отменить поездку
+                        </Button>
                       )}
                       {ride.status === "DRAFT" && (
                         <div className="flex flex-wrap items-center gap-3">

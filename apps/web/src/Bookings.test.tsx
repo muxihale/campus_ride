@@ -298,3 +298,113 @@ it("аккаунту без роли пассажира не открывает 
     )
   ).toBe(false)
 })
+
+it("отменяет подтверждённую заявку только после подтверждения и показывает полный демо-возврат", async () => {
+  const payment = {
+    id: "payment",
+    status: "SUCCEEDED",
+    amountKopecks: 24100,
+    isDemo: true,
+    paidAt: "2099-11-01T03:00:00Z",
+    refundedAt: null,
+  }
+  await start(page([{ ...row, payment }]))
+  expect(screen.getByText("Демо-платёж: Оплачен")).toBeTruthy()
+  await userEvent.click(
+    screen.getByRole("button", { name: "Отменить мою заявку" })
+  )
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+  await userEvent.type(
+    screen.getByLabelText("Причина отмены (необязательно)"),
+    "Изменились планы"
+  )
+  fetchMock
+    .mockResolvedValueOnce(json({ status: "CANCELLED" }))
+    .mockResolvedValueOnce(
+      json(
+        page([
+          {
+            ...row,
+            status: "CANCELLED",
+            cancellationReason: "Изменились планы",
+            payment: {
+              ...payment,
+              status: "REFUNDED",
+              refundedAt: "2099-11-01T04:00:00Z",
+            },
+          },
+        ])
+      )
+    )
+  await userEvent.click(screen.getByRole("button", { name: "Отменить заявку" }))
+  await screen.findByText("Заявка: Отменена")
+  expect(screen.getByText("Демо-платёж: Полностью возвращён")).toBeTruthy()
+  expect(screen.getByText("Сумма демо-платежа: 241,00 ₽")).toBeTruthy()
+  expect(fetchMock.mock.calls[1]![0]).toBe(`/api/bookings/${row.id}/cancel`)
+  expect(JSON.parse(String(fetchMock.mock.calls[1]![1]?.body))).toEqual({
+    reason: "Изменились планы",
+  })
+  expect(
+    screen.queryByRole("button", { name: "Отменить мою заявку" })
+  ).toBeNull()
+})
+it("отмена ожидающей заявки допускает пустую причину и отменяет демо-платёж без списания", async () => {
+  await start(page([{ ...row, status: "PENDING" }]))
+  await userEvent.click(
+    screen.getByRole("button", { name: "Отменить мою заявку" })
+  )
+  fetchMock
+    .mockResolvedValueOnce(json({ status: "CANCELLED" }))
+    .mockResolvedValueOnce(
+      json(
+        page([
+          {
+            ...row,
+            status: "CANCELLED",
+            payment: {
+              id: "payment",
+              status: "CANCELLED",
+              amountKopecks: 24100,
+              isDemo: true,
+              paidAt: null,
+              refundedAt: null,
+            },
+          },
+        ])
+      )
+    )
+  await userEvent.click(screen.getByRole("button", { name: "Отменить заявку" }))
+  await screen.findByText("Демо-платёж: Отменён без списания")
+  expect(fetchMock.mock.calls[1]![1]?.body).toBe("{}")
+})
+it("не отменяет заявку при закрытой поездке или после отправления", async () => {
+  await start(
+    page([
+      { ...row, ride: { ...row.ride, departureAt: "2020-01-01T00:00:00Z" } },
+    ])
+  )
+  expect(
+    screen.queryByRole("button", { name: "Отменить мою заявку" })
+  ).toBeNull()
+})
+it("сохраняет причину отмены при сетевом сбое и позволяет повторить", async () => {
+  await start()
+  await userEvent.click(
+    screen.getByRole("button", { name: "Отменить мою заявку" })
+  )
+  await userEvent.type(
+    screen.getByLabelText("Причина отмены (необязательно)"),
+    "Изменились планы"
+  )
+  fetchMock.mockRejectedValueOnce(new TypeError("Offline"))
+  await userEvent.click(screen.getByRole("button", { name: "Отменить заявку" }))
+  await screen.findByRole("alert")
+  expect(
+    (
+      screen.getByLabelText(
+        "Причина отмены (необязательно)"
+      ) as HTMLTextAreaElement
+    ).value
+  ).toBe("Изменились планы")
+  expect(screen.getByRole("button", { name: "Отменить заявку" })).toBeTruthy()
+})

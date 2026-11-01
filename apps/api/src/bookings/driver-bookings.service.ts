@@ -1,3 +1,4 @@
+import { paymentSelect, serializePayment } from "./payment.js"
 import {
   BadRequestException,
   Inject,
@@ -91,6 +92,7 @@ export class DriverBookingsService {
             skip: (query.page - 1) * query.pageSize,
             take: query.pageSize,
             select: {
+              payment: { select: paymentSelect },
               id: true,
               rideId: true,
               passengerId: true,
@@ -131,6 +133,7 @@ export class DriverBookingsService {
           const { bookings, seatsTotal, driver, ...details } = ride
           return {
             ...row,
+            payment: serializePayment(row.payment),
             ride: {
               ...details,
               driver: driver.user,

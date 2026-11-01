@@ -1,3 +1,4 @@
+import { PaymentInfo, type DemoPayment } from "./PaymentInfo"
 import { useEffect, useRef, useState, type FormEvent } from "react"
 import { Button } from "@workspace/ui/components/button"
 import { ApiError, apiRequest } from "./auth"
@@ -23,6 +24,7 @@ export type OwnBooking = {
   seats: number
   unitPriceKopecks: number
   cancellationReason: string | null
+  payment?: DemoPayment | null
   createdAt: string
   passenger?: { id: string; fullName: string; affiliation: string | null }
   ride: {
@@ -59,7 +61,7 @@ export function BookingsScreen({
 }) {
   const [command, setCommand] = useState<{
     item: OwnBooking
-    kind: "confirm" | "reject"
+    kind: "confirm" | "reject" | "cancel"
   } | null>(null)
   const [reason, setReason] = useState("")
   const [pending, setPending] = useState(false)
@@ -166,6 +168,10 @@ export function BookingsScreen({
       setCommandError("Укажите причину от 1 до 500 символов")
       return
     }
+    if (command.kind === "cancel" && reason.trim().length > 500) {
+      setCommandError("Причина — не более 500 символов")
+      return
+    }
     busy.current = true
     setPending(true)
     setCommandError("")
@@ -174,13 +180,17 @@ export function BookingsScreen({
       await apiRequest(
         `bookings/${command.item.id}/${command.kind}`,
         "POST",
-        command.kind === "reject" ? { reason: reason.trim() } : {}
+        command.kind !== "confirm" && reason.trim()
+          ? { reason: reason.trim() }
+          : {}
       )
       if (!active.current) return
       setNotice(
         command.kind === "confirm"
           ? "Заявка подтверждена."
-          : "Заявка отклонена."
+          : command.kind === "cancel"
+            ? "Заявка отменена. Демонстрационный платёж отменён или полностью возвращён."
+            : "Заявка отклонена."
       )
       setCommand(null)
       setRevision((value) => value + 1)
@@ -379,18 +389,22 @@ export function BookingsScreen({
           <h2 className="text-lg font-semibold">
             {command.kind === "confirm"
               ? "Подтвердить заявку?"
-              : "Отклонить заявку?"}
+              : command.kind === "cancel"
+                ? "Отменить свою заявку?"
+                : "Отклонить заявку?"}
           </h2>
           <p>
             {command.item.passenger?.fullName} · {command.item.ride.origin.name}{" "}
             → {command.item.ride.destination.name} · Мест: {command.item.seats}
           </p>
-          {command.kind === "reject" && (
+          {command.kind !== "confirm" && (
             <label className="block text-sm font-medium">
-              Причина отклонения
+              {command.kind === "cancel"
+                ? "Причина отмены (необязательно)"
+                : "Причина отклонения"}
               <textarea
                 className={`${input} min-h-24 py-3`}
-                required
+                required={command.kind === "reject"}
                 maxLength={500}
                 disabled={pending}
                 value={reason}
@@ -401,13 +415,22 @@ export function BookingsScreen({
               />
             </label>
           )}
+          {command.kind === "cancel" && (
+            <p className="text-sm">
+              Места освободятся. Успешная демо-оплата будет полностью
+              возвращена; ожидающий платёж отменится без списания. Реальные
+              деньги не используются.
+            </p>
+          )}
           <div className="flex flex-wrap gap-3">
             <Button type="submit" disabled={pending}>
               {pending
                 ? "Сохраняем решение…"
                 : command.kind === "confirm"
                   ? "Подтвердить заявку"
-                  : "Отклонить заявку"}
+                  : command.kind === "cancel"
+                    ? "Отменить заявку"
+                    : "Отклонить заявку"}
             </Button>
             <Button
               type="button"
@@ -501,6 +524,25 @@ export function BookingsScreen({
                       <p className="text-xs break-all text-muted-foreground">
                         Номер заявки: {item.id}
                       </p>
+                      <PaymentInfo payment={item.payment} />
+                      {!driver &&
+                        ["PENDING", "CONFIRMED"].includes(item.status) &&
+                        item.ride.status === "PUBLISHED" &&
+                        new Date(item.ride.departureAt).getTime() >
+                          (result.loadedAt ?? 0) && (
+                          <Button
+                            variant="outline"
+                            disabled={pending}
+                            onClick={() => {
+                              setCommand({ item, kind: "cancel" })
+                              setReason("")
+                              setCommandError("")
+                              setNotice("")
+                            }}
+                          >
+                            Отменить мою заявку
+                          </Button>
+                        )}
                       {driver && (
                         <>
                           <p className="text-sm text-muted-foreground">

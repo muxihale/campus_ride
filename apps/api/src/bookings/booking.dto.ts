@@ -1,4 +1,5 @@
-import { ApiProperty } from "@nestjs/swagger"
+import { DemoPaymentDto } from "./payment.js"
+import { ApiProperty, PartialType } from "@nestjs/swagger"
 import { Transform } from "class-transformer"
 import { IsInt, IsUUID, IsString, Length, Max, Min } from "class-validator"
 import { BookingStatus } from "../generated/prisma/enums.js"
@@ -19,6 +20,8 @@ export class CreateBookingDto {
   requestKey!: string
 }
 export class BookingDto {
+  @ApiProperty({ type: DemoPaymentDto, nullable: true })
+  payment!: DemoPaymentDto | null
   @ApiProperty({ type: String, format: "uuid" })
   id!: string
   @ApiProperty({ type: String, format: "uuid" })
@@ -63,3 +66,7 @@ export class BookingDecisionDto extends BookingDto {
   })
   cancellationReason!: string | null
 }
+
+export class CancelBookingDto extends PartialType(RejectBookingDto, {
+  skipNullProperties: false,
+}) {}

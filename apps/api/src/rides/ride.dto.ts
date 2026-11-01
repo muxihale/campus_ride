@@ -118,6 +118,8 @@ export class RideStopDto extends RideStopInputDto {
 }
 
 export class RideDto extends OmitType(CreateRideDto, ["stops"] as const) {
+  @ApiProperty({ type: String, nullable: true })
+  cancellationReason!: string | null
   @ApiProperty({ type: String, format: "uuid" })
   id!: string
   @ApiProperty({ type: String, format: "uuid" })

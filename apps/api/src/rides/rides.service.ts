@@ -27,6 +27,7 @@ const rideSelect = {
   smokingAllowed: true,
   conditions: true,
   status: true,
+  cancellationReason: true,
   createdAt: true,
   updatedAt: true,
   stops: {

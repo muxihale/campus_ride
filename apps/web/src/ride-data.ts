@@ -8,6 +8,7 @@ export type RideVehicle = {
   passengerSeats: number
 }
 export type Ride = {
+  cancellationReason?: string | null
   id: string
   status: string
   vehicleId: string

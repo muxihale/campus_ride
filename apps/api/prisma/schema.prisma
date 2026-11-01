@@ -226,7 +226,7 @@ model Booking {
 model Payment {
   id            String        @id @default(uuid()) @db.Uuid
   bookingId     String        @unique @db.Uuid
-  amountKopecks Int
+  amountKopecks BigInt
   status        PaymentStatus @default(PENDING)
   isDemo        Boolean       @default(true)
   paidAt        DateTime?     @db.Timestamptz(3)
