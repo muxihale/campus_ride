@@ -46,17 +46,66 @@ const focusHeading = (element: HTMLHeadingElement | null) => {
   element?.focus()
 }
 
+type RideCommand = "publish" | "delete" | "cancel" | "start" | "complete"
+const commands: Record<
+  RideCommand,
+  { title: string; description: string; confirm: string; success: string }
+> = {
+  publish: {
+    title: "Опубликовать поездку?",
+    description:
+      "После публикации редактирование и удаление черновика будут недоступны.",
+    confirm: "Подтвердить публикацию",
+    success: "Поездка опубликована.",
+  },
+  delete: {
+    title: "Удалить черновик?",
+    description: "Черновик будет удалён вместе с остановками.",
+    confirm: "Удалить окончательно",
+    success: "Черновик удалён.",
+  },
+  cancel: {
+    title: "Отменить поездку?",
+    description:
+      "Все активные заявки будут отменены. Успешные демонстрационные платежи полностью возвращаются. Реальные деньги не используются.",
+    confirm: "Подтвердить отмену поездки",
+    success:
+      "Поездка отменена. Активные заявки отменены, выполнены полные демо-возвраты.",
+  },
+  start: {
+    title: "Начать поездку?",
+    description:
+      "Поездка начнётся сразу, даже если запланированное отправление ещё впереди. Ожидающие заявки будут отклонены, их неоплаченные демо-платежи отменены без списания. Новые бронирования и обычная отмена поездки станут недоступны.",
+    confirm: "Подтвердить начало поездки",
+    success: "Поездка началась. Ожидающие заявки обработаны.",
+  },
+  complete: {
+    title: "Завершить поездку?",
+    description:
+      "Подтверждённые заявки станут завершёнными. Успешные демонстрационные оплаты сохранятся, возврат не выполняется. Повторно начать поездку будет нельзя. Реальные деньги не используются.",
+    confirm: "Подтвердить завершение поездки",
+    success: "Поездка завершена. Подтверждённые заявки перенесены в историю.",
+  },
+}
+
 export function RidesScreen({ onExpired }: { onExpired: () => void }) {
   const [draft, setDraft] = useState<Filters>(empty)
   const [query, setQuery] = useState("")
   const [page, setPage] = useState(1)
   const [revision, setRevision] = useState(0)
   const [command, setCommand] = useState<{
-    kind: "publish" | "delete" | "cancel"
+    kind: RideCommand
     ride: Ride
   } | null>(null)
   const [reason, setReason] = useState("")
   const busy = useRef(false)
+  const active = useRef(true)
+  useEffect(() => {
+    active.current = true
+    return () => {
+      active.current = false
+    }
+  }, [])
   const [pending, setPending] = useState(false)
   const [error, setError] = useState("")
   const [notice, setNotice] = useState("")
@@ -186,7 +235,7 @@ export function RidesScreen({ onExpired }: { onExpired: () => void }) {
     setPage(1)
     setError("")
   }
-  function open(kind: "publish" | "delete" | "cancel", ride: Ride) {
+  function open(kind: RideCommand, ride: Ride) {
     setCommand({ kind, ride })
     setReason("")
     setError("")
@@ -206,28 +255,22 @@ export function RidesScreen({ onExpired }: { onExpired: () => void }) {
     setError("")
     try {
       await apiRequest(
-        command.kind === "publish"
-          ? `rides/${command.ride.id}/publish`
-          : command.kind === "cancel"
-            ? `rides/${command.ride.id}/cancel`
-            : `rides/${command.ride.id}`,
-        command.kind !== "delete" ? "POST" : "DELETE",
-        command.kind === "publish"
-          ? {}
+        command.kind === "delete"
+          ? `rides/${command.ride.id}`
+          : `rides/${command.ride.id}/${command.kind}`,
+        command.kind === "delete" ? "DELETE" : "POST",
+        command.kind === "delete"
+          ? undefined
           : command.kind === "cancel"
             ? { reason: reason.trim() }
-            : undefined
+            : {}
       )
-      setNotice(
-        command.kind === "publish"
-          ? "Поездка опубликована."
-          : command.kind === "cancel"
-            ? "Поездка отменена. Активные заявки отменены, выполнены полные демо-возвраты."
-            : "Черновик удалён."
-      )
+      if (!active.current) return
+      setNotice(commands[command.kind].success)
       setCommand(null)
       setRevision((value) => value + 1)
     } catch (cause) {
+      if (!active.current) return
       if (cause instanceof ApiError && cause.status === 401) onExpired()
       else {
         setError(
@@ -236,7 +279,7 @@ export function RidesScreen({ onExpired }: { onExpired: () => void }) {
             : "Не удалось выполнить действие"
         )
         if (
-          command.kind !== "cancel" ||
+          ["publish", "delete"].includes(command.kind) ||
           (cause instanceof ApiError && [404, 409].includes(cause.status))
         )
           setCommand(null)
@@ -245,7 +288,7 @@ export function RidesScreen({ onExpired }: { onExpired: () => void }) {
       }
     } finally {
       busy.current = false
-      setPending(false)
+      if (active.current) setPending(false)
     }
   }
   function options() {
@@ -443,22 +486,14 @@ export function RidesScreen({ onExpired }: { onExpired: () => void }) {
             ref={focusHeading}
             className="text-lg font-semibold"
           >
-            {command.kind === "publish"
-              ? "Опубликовать поездку?"
-              : command.kind === "cancel"
-                ? "Отменить поездку?"
-                : "Удалить черновик?"}
+            {commands[command.kind].title}
           </h2>
           <p className="text-sm">
             {routeName(command.ride)} ·{" "}
             {ekaterinburgInput(command.ride.departureAt).replace("T", " ")}
           </p>
           <p className="text-sm text-muted-foreground">
-            {command.kind === "publish"
-              ? "После публикации редактирование и удаление черновика будут недоступны."
-              : command.kind === "cancel"
-                ? "Все активные заявки будут отменены. Успешные демонстрационные платежи полностью возвращаются. Реальные деньги не используются."
-                : "Черновик будет удалён вместе с остановками."}
+            {commands[command.kind].description}
           </p>
           {command.kind === "cancel" && (
             <label className="block text-sm font-medium">
@@ -473,14 +508,12 @@ export function RidesScreen({ onExpired }: { onExpired: () => void }) {
             </label>
           )}
           <div className="flex flex-wrap gap-3">
-            <Button disabled={pending} onClick={() => void execute()}>
-              {pending
-                ? "Подождите…"
-                : command.kind === "publish"
-                  ? "Подтвердить публикацию"
-                  : command.kind === "cancel"
-                    ? "Подтвердить отмену поездки"
-                    : "Удалить окончательно"}
+            <Button
+              className="h-auto min-h-9 whitespace-normal"
+              disabled={pending}
+              onClick={() => void execute()}
+            >
+              {pending ? "Подождите…" : commands[command.kind].confirm}
             </Button>
             <Button
               variant="outline"
@@ -544,6 +577,14 @@ export function RidesScreen({ onExpired }: { onExpired: () => void }) {
                   const car = vehicles.find(
                     (item) => item.id === ride.vehicleId
                   )
+                  const canStart =
+                    ride.status === "PUBLISHED" &&
+                    !ride.startedAt &&
+                    !ride.completedAt
+                  const canComplete =
+                    ride.status === "IN_PROGRESS" &&
+                    Boolean(ride.startedAt) &&
+                    !ride.completedAt
                   return (
                     <li
                       key={ride.id}
@@ -559,6 +600,23 @@ export function RidesScreen({ onExpired }: { onExpired: () => void }) {
                           {rideStatusNames[ride.status] ?? ride.status}
                         </span>
                       </div>
+                      {ride.startedAt && (
+                        <p className="text-sm">
+                          Начало:{" "}
+                          {ekaterinburgInput(ride.startedAt).replace("T", " ")}{" "}
+                          · Екатеринбург
+                        </p>
+                      )}
+                      {ride.completedAt && (
+                        <p className="text-sm">
+                          Завершение:{" "}
+                          {ekaterinburgInput(ride.completedAt).replace(
+                            "T",
+                            " "
+                          )}{" "}
+                          · Екатеринбург
+                        </p>
+                      )}
                       {ride.cancellationReason && (
                         <p className="text-sm break-words">
                           Причина отмены: {ride.cancellationReason}
@@ -596,6 +654,26 @@ export function RidesScreen({ onExpired }: { onExpired: () => void }) {
                             .map((stop) => locationName(stop.locationId))
                             .join(" → ")}
                         </p>
+                      )}
+                      {(canStart || canComplete) && (
+                        <div className="flex flex-wrap gap-3">
+                          {canStart && (
+                            <Button
+                              disabled={pending || command !== null}
+                              onClick={() => open("start", ride)}
+                            >
+                              Начать поездку
+                            </Button>
+                          )}
+                          {canComplete && (
+                            <Button
+                              disabled={pending || command !== null}
+                              onClick={() => open("complete", ride)}
+                            >
+                              Завершить поездку
+                            </Button>
+                          )}
+                        </div>
                       )}
                       {["DRAFT", "PUBLISHED"].includes(ride.status) && (
                         <Button
@@ -642,7 +720,7 @@ export function RidesScreen({ onExpired }: { onExpired: () => void }) {
             >
               <Button
                 variant="outline"
-                disabled={page <= 1 || pending}
+                disabled={page <= 1 || pending || command !== null}
                 onClick={() => setPage((value) => value - 1)}
               >
                 Назад
@@ -652,7 +730,9 @@ export function RidesScreen({ onExpired }: { onExpired: () => void }) {
               </span>
               <Button
                 variant="outline"
-                disabled={page * 10 >= data.total || pending}
+                disabled={
+                  page * 10 >= data.total || pending || command !== null
+                }
                 onClick={() => setPage((value) => value + 1)}
               >
                 Далее

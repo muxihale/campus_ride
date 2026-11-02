@@ -1,4 +1,11 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react"
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { App } from "./App"
@@ -35,6 +42,8 @@ const ride = {
   smokingAllowed: false,
   stops: [],
   status: "DRAFT",
+  startedAt: null as string | null,
+  completedAt: null as string | null,
 }
 const fetchMock = vi.fn<typeof fetch>()
 const response = (body: unknown, status = 200) =>
@@ -77,8 +86,25 @@ function start({
     if (options?.method === "POST") {
       if (failure)
         return response({ message: "Не удалось опубликовать поездку" }, failure)
-      current = current.map((item) => ({ ...item, status: "PUBLISHED" }))
-      return response(current[0])
+      const kind = path.split("/").at(-1)
+      current = current.map((item) =>
+        item.id !== path.split("/")[3]
+          ? item
+          : {
+              ...item,
+              status:
+                kind === "start"
+                  ? "IN_PROGRESS"
+                  : kind === "complete"
+                    ? "COMPLETED"
+                    : "PUBLISHED",
+              startedAt:
+                kind === "start" ? "2099-11-09T03:05:00Z" : item.startedAt,
+              completedAt:
+                kind === "complete" ? "2099-11-09T03:45:00Z" : item.completedAt,
+            }
+      )
+      return response(current.find((item) => item.id === path.split("/")[3]))
     }
     if (options?.method === "DELETE") {
       current = []
@@ -360,4 +386,235 @@ it("отменяет поездку с причиной и предупрежд�
     reason: "Автомобиль в ремонте",
   })
   expect(screen.queryByRole("button", { name: "Отменить поездку" })).toBeNull()
+})
+
+it("начинает поездку только после подтверждения и обновляет статус и время", async () => {
+  start({ items: [{ ...ride, status: "PUBLISHED" }] })
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Начать поездку" })
+  )
+  expect(screen.getByRole("heading", { name: "Начать поездку?" })).toBeTruthy()
+  expect(screen.getByText(/Ожидающие заявки будут отклонены/)).toBeTruthy()
+  expect(commandCalls()).toHaveLength(0)
+  await userEvent.click(screen.getByRole("button", { name: "Отмена" }))
+  expect(commandCalls()).toHaveLength(0)
+  await userEvent.click(screen.getByRole("button", { name: "Начать поездку" }))
+  await userEvent.click(
+    screen.getByRole("button", { name: "Подтвердить начало поездки" })
+  )
+  expect(
+    await screen.findByText("Начало: 2099-11-09 08:05 · Екатеринбург")
+  ).toBeTruthy()
+  expect(screen.getByRole("button", { name: "Завершить поездку" })).toBeTruthy()
+  expect(screen.queryByRole("button", { name: "Начать поездку" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Отменить поездку" })).toBeNull()
+  expect(commandCalls()[0]![0]).toBe(`/api/rides/${ride.id}/start`)
+  expect(commandCalls()[0]![1]).toMatchObject({ method: "POST", body: "{}" })
+})
+it("завершает поездку с подтверждением и показывает серверные даты", async () => {
+  start({
+    items: [
+      { ...ride, status: "IN_PROGRESS", startedAt: "2099-11-09T03:05:00Z" },
+    ],
+  })
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Завершить поездку" })
+  )
+  expect(
+    screen.getByText(/Успешные демонстрационные оплаты сохранятся/)
+  ).toBeTruthy()
+  expect(commandCalls()).toHaveLength(0)
+  await userEvent.click(
+    screen.getByRole("button", { name: "Подтвердить завершение поездки" })
+  )
+  await screen.findByText("Завершение: 2099-11-09 08:45 · Екатеринбург")
+  expect(
+    screen.getByText("Начало: 2099-11-09 08:05 · Екатеринбург")
+  ).toBeTruthy()
+  expect(
+    screen.getByText(
+      "Поездка завершена. Подтверждённые заявки перенесены в историю."
+    )
+  ).toBeTruthy()
+  expect(screen.queryByRole("button", { name: "Завершить поездку" })).toBeNull()
+  expect(commandCalls()[0]![0]).toBe(`/api/rides/${ride.id}/complete`)
+  expect(commandCalls()[0]![1]).toMatchObject({ method: "POST", body: "{}" })
+})
+it.each(["DRAFT", "CANCELLED", "COMPLETED"])(
+  "не предлагает старт и завершение для %s",
+  async (status) => {
+    start({ items: [{ ...ride, status }] })
+    await screen.findByText("Найдено поездок: 1")
+    expect(screen.queryByRole("button", { name: "Начать поездку" })).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Завершить поездку" })
+    ).toBeNull()
+  }
+)
+it("не предлагает завершение поездки без времени начала", async () => {
+  start({ items: [{ ...ride, status: "IN_PROGRESS" }] })
+  await screen.findByText("Найдено поездок: 1")
+  expect(screen.queryByRole("button", { name: "Завершить поездку" })).toBeNull()
+})
+it("защищает начало поездки от двойной отправки", async () => {
+  start({ items: [{ ...ride, status: "PUBLISHED" }] })
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Начать поездку" })
+  )
+  let resolve!: (value: Response) => void
+  fetchMock.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done
+      })
+  )
+  const button = screen.getByRole("button", {
+    name: "Подтвердить начало поездки",
+  })
+  fireEvent.click(button)
+  fireEvent.click(button)
+  expect(commandCalls()).toHaveLength(1)
+  expect(
+    (screen.getByRole("button", { name: "Подождите…" }) as HTMLButtonElement)
+      .disabled
+  ).toBe(true)
+  await act(async () => {
+    resolve(
+      response({
+        id: ride.id,
+        status: "IN_PROGRESS",
+        startedAt: "2099-11-09T03:05:00Z",
+      })
+    )
+  })
+  await screen.findByText("Поездка началась. Ожидающие заявки обработаны.")
+})
+it("сохраняет команду после сетевого сбоя и позволяет повторить старт", async () => {
+  start({ items: [{ ...ride, status: "PUBLISHED" }] })
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Начать поездку" })
+  )
+  fetchMock.mockRejectedValueOnce(new TypeError("Offline"))
+  await userEvent.click(
+    screen.getByRole("button", { name: "Подтвердить начало поездки" })
+  )
+  await screen.findByRole("alert")
+  expect(screen.getByRole("heading", { name: "Начать поездку?" })).toBeTruthy()
+  await userEvent.click(
+    screen.getByRole("button", { name: "Подтвердить начало поездки" })
+  )
+  await screen.findByText("Начало: 2099-11-09 08:05 · Екатеринбург")
+  expect(commandCalls()).toHaveLength(2)
+})
+it("при конфликте закрывает старую команду и загружает актуальный статус", async () => {
+  start({ items: [{ ...ride, status: "PUBLISHED" }] })
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Начать поездку" })
+  )
+  const original = fetchMock.getMockImplementation()!
+  fetchMock.mockImplementation(async (url, init) => {
+    if (String(url).endsWith("/start"))
+      return response({ message: "Поездка уже отменена" }, 409)
+    if (String(url).startsWith("/api/me/rides?"))
+      return response({
+        items: [{ ...ride, status: "CANCELLED" }],
+        total: 1,
+        page: 1,
+        pageSize: 10,
+      })
+    return original(url, init)
+  })
+  await userEvent.click(
+    screen.getByRole("button", { name: "Подтвердить начало поездки" })
+  )
+  await screen.findByText("Найдено поездок: 1")
+  expect(screen.getByRole("alert").textContent).toContain("уже отменена")
+  expect(screen.queryByRole("heading", { name: "Начать поездку?" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Начать поездку" })).toBeNull()
+})
+it("обновляет список после старта с прежними фильтрами", async () => {
+  start({ items: [{ ...ride, status: "PUBLISHED" }] })
+  await screen.findByText("Найдено поездок: 1")
+  await userEvent.selectOptions(screen.getByLabelText("Статус"), "PUBLISHED")
+  await userEvent.click(screen.getByRole("button", { name: "Найти" }))
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Начать поездку" })
+  )
+  await userEvent.click(
+    screen.getByRole("button", { name: "Подтвердить начало поездки" })
+  )
+  await screen.findByText("Поездка началась. Ожидающие заявки обработаны.")
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls
+        .filter(([url]) => String(url).startsWith("/api/me/rides?"))
+        .at(-1)![0]
+    ).toContain("status=PUBLISHED")
+  )
+})
+it("не повторяет успешный POST при ошибке последующей загрузки списка", async () => {
+  start({ items: [{ ...ride, status: "PUBLISHED" }] })
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Начать поездку" })
+  )
+  let reloads = 0
+  const original = fetchMock.getMockImplementation()!
+  fetchMock.mockImplementation(async (url, init) => {
+    if (String(url).startsWith("/api/me/rides?") && reloads++ === 0)
+      throw new TypeError("Offline")
+    return original(url, init)
+  })
+  await userEvent.click(
+    screen.getByRole("button", { name: "Подтвердить начало поездки" })
+  )
+  await screen.findByRole("button", { name: "Повторить загрузку" })
+  expect(
+    screen.getByText("Поездка началась. Ожидающие заявки обработаны.")
+  ).toBeTruthy()
+  await userEvent.click(
+    screen.getByRole("button", { name: "Повторить загрузку" })
+  )
+  await screen.findByText("Начало: 2099-11-09 08:05 · Екатеринбург")
+  expect(commandCalls()).toHaveLength(1)
+})
+it("возвращает вход при истечении сессии во время завершения", async () => {
+  start({
+    items: [
+      { ...ride, status: "IN_PROGRESS", startedAt: "2099-11-09T03:05:00Z" },
+    ],
+  })
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Завершить поездку" })
+  )
+  fetchMock.mockResolvedValueOnce(response({ message: "Войдите" }, 401))
+  await userEvent.click(
+    screen.getByRole("button", { name: "Подтвердить завершение поездки" })
+  )
+  await screen.findByRole("heading", { name: "С возвращением" })
+})
+it("игнорирует ответ команды после ухода из списка", async () => {
+  start({ items: [{ ...ride, status: "PUBLISHED" }] })
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Начать поездку" })
+  )
+  let resolve!: (value: Response) => void
+  fetchMock.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done
+      })
+  )
+  await userEvent.click(
+    screen.getByRole("button", { name: "Подтвердить начало поездки" })
+  )
+  await userEvent.click(screen.getByRole("link", { name: "Кабинет водителя" }))
+  await screen.findByRole("heading", { name: "Кабинет водителя" })
+  const calls = fetchMock.mock.calls.length
+  await act(async () => {
+    resolve(response({ id: ride.id, status: "IN_PROGRESS" }))
+  })
+  expect(fetchMock).toHaveBeenCalledTimes(calls)
+  expect(
+    screen.queryByText("Поездка началась. Ожидающие заявки обработаны.")
+  ).toBeNull()
 })
