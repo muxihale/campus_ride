@@ -1,3 +1,4 @@
+import { recordRideLifecycle } from "./lifecycle-events.js"
 import { changePayment } from "../bookings/payment.js"
 import {
   ConflictException,
@@ -43,7 +44,7 @@ export class RideStartService {
         const pending = await tx.booking.findMany({
           where: { rideId: id, status: "PENDING" },
           orderBy: { id: "asc" },
-          select: { id: true },
+          select: { id: true, passengerId: true },
         })
         for (const booking of pending) {
           await changePayment(tx, booking.id, "CANCELLED", driverId)
@@ -62,7 +63,37 @@ export class RideStartService {
               },
             },
           })
+          await tx.activityLog.create({
+            data: {
+              actorId: driverId,
+              action: "booking.rejected",
+              resourceType: "booking",
+              resourceId: booking.id,
+              details: {
+                fromStatus: "PENDING",
+                toStatus: "REJECTED",
+                reason: START_REJECTION_REASON,
+                automatic: true,
+                rideId: id,
+              },
+            },
+          })
+          await tx.notification.create({
+            data: {
+              userId: booking.passengerId,
+              kind: "BOOKING_REJECTED",
+              title: "Заявка отклонена при начале поездки",
+              body: START_REJECTION_REASON,
+              link: "#/bookings",
+              resourceType: "booking",
+              resourceId: booking.id,
+            },
+          })
         }
+        const confirmed = await tx.booking.findMany({
+          where: { rideId: id, status: "CONFIRMED" },
+          select: { passengerId: true },
+        })
         const updated = await tx.ride.update({
           where: { id },
           data: {
@@ -78,6 +109,14 @@ export class RideStartService {
           },
           select,
         })
+        await recordRideLifecycle(
+          tx,
+          driverId,
+          id,
+          false,
+          confirmed.map((booking) => booking.passengerId),
+          updated.startedAt!
+        )
         return {
           id: updated.id,
           status: "IN_PROGRESS",

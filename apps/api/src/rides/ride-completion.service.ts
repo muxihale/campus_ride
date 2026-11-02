@@ -1,3 +1,4 @@
+import { recordRideLifecycle } from "./lifecycle-events.js"
 import {
   ConflictException,
   HttpException,
@@ -60,6 +61,7 @@ export class RideCompletionService {
           orderBy: { id: "asc" },
           select: {
             id: true,
+            passengerId: true,
             seats: true,
             unitPriceKopecks: true,
             payment: {
@@ -91,6 +93,19 @@ export class RideCompletionService {
               },
             },
           })
+          await tx.activityLog.create({
+            data: {
+              actorId: driverId,
+              action: "booking.completed",
+              resourceType: "booking",
+              resourceId: booking.id,
+              details: {
+                fromStatus: "CONFIRMED",
+                toStatus: "COMPLETED",
+                rideId: id,
+              },
+            },
+          })
         }
         await tx.ride.update({
           where: { id },
@@ -106,6 +121,14 @@ export class RideCompletionService {
             },
           },
         })
+        await recordRideLifecycle(
+          tx,
+          driverId,
+          id,
+          true,
+          bookings.map((booking) => booking.passengerId),
+          completedAt
+        )
         return {
           id: ride.id,
           status: "COMPLETED",

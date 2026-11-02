@@ -2341,9 +2341,9 @@ describe("Создание заявки и решения водителя (HTTP
       await prisma.notification.count({
         where: { userId: { in: accounts.map((account) => account.id) } },
       })
-    ).toBe(notificationsBefore)
+    ).toBe(notificationsBefore + 3)
     expect(await prisma.activityLog.count({ where: { actorId: driver } })).toBe(
-      logsBefore
+      logsBefore + 3
     )
   })
   it("не меняет ранее отменённые и отклонённые заявки или платежи", async () => {
@@ -2704,4 +2704,181 @@ describe("Создание заявки и решения водителя (HTTP
         .status
     ).toBe("SUCCEEDED")
   })
+  it("адресует уведомления участникам и не дублирует их при повторах", async () => {
+    const confirmed = await pending(1)
+    await decide(confirmed).expect(200)
+    const rejected = (
+      await send({ seats: 1, requestKey: randomUUID() }, 2).expect(201)
+    ).body.id as string
+    await startRide().expect(200)
+    const started = await prisma.notification.findMany({
+      where: { resourceId: rideId, kind: "RIDE_STARTED" },
+    })
+    expect(started.map((row) => row.userId).sort()).toEqual(
+      [driver, accounts[1]!.id].sort()
+    )
+    expect(started.find((row) => row.userId === driver)?.link).toBe("#/rides")
+    expect(started.find((row) => row.userId !== driver)?.link).toBe(
+      "#/bookings"
+    )
+    const rejection = await prisma.notification.findMany({
+      where: { resourceId: rejected, kind: "BOOKING_REJECTED" },
+    })
+    expect(rejection).toHaveLength(1)
+    expect(rejection[0]).toMatchObject({
+      userId: accounts[2]!.id,
+      body: START_REJECTION_REASON,
+      link: "#/bookings",
+    })
+    expect(
+      await prisma.activityLog.findFirst({
+        where: { resourceId: rejected, action: "booking.rejected" },
+      })
+    ).toMatchObject({
+      actorId: driver,
+      details: { automatic: true, reason: START_REJECTION_REASON, rideId },
+    })
+    await startRide().expect(200)
+    await Promise.all([completeRide().expect(200), completeRide().expect(200)])
+    expect(
+      await prisma.notification.count({
+        where: { resourceId: rideId, kind: "RIDE_STARTED" },
+      })
+    ).toBe(2)
+    expect(
+      await prisma.notification.findMany({
+        where: { resourceId: rideId, kind: "RIDE_COMPLETED" },
+      })
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ userId: driver, link: "#/rides" }),
+        expect.objectContaining({
+          userId: accounts[1]!.id,
+          link: "#/bookings",
+        }),
+      ])
+    )
+    expect(
+      await prisma.notification.count({
+        where: { resourceId: rideId, kind: "RIDE_COMPLETED" },
+      })
+    ).toBe(2)
+    for (const action of ["ride.started", "ride.completed"])
+      expect(
+        await prisma.activityLog.count({
+          where: { resourceId: rideId, action },
+        })
+      ).toBe(1)
+    expect(
+      await prisma.activityLog.count({
+        where: { resourceId: confirmed, action: "booking.completed" },
+      })
+    ).toBe(1)
+    expect(
+      (await notifications("kind=RIDE_COMPLETED", 2).expect(200)).body.total
+    ).toBe(0)
+    expect(
+      (await notifications("kind=RIDE_COMPLETED", 1).expect(200)).body.total
+    ).toBe(1)
+  })
+  it.each([false, true])(
+    "откатывает переход и журнал при сбое уведомления (завершение=%s)",
+    async (completed) => {
+      const id = await pending()
+      if (completed) {
+        await decide(id).expect(200)
+        await startRide().expect(200)
+      }
+      const before = await prisma.activityLog.count({
+        where: { actorId: driver },
+      })
+      const notificationCount = await prisma.notification.count({
+        where: { userId: { in: accounts.map((account) => account.id) } },
+      })
+      // При старте первая запись — уведомление платежа, вторая — автоотклонение.
+      const spy = failNotificationWrite(completed ? 2 : 3)
+      try {
+        await (completed ? completeRide() : startRide()).expect(503)
+      } finally {
+        spy.mockRestore()
+      }
+      expect(
+        (await prisma.ride.findUniqueOrThrow({ where: { id: rideId } })).status
+      ).toBe(completed ? "IN_PROGRESS" : "PUBLISHED")
+      expect(
+        (await prisma.booking.findUniqueOrThrow({ where: { id } })).status
+      ).toBe(completed ? "CONFIRMED" : "PENDING")
+      expect(
+        await prisma.activityLog.count({ where: { actorId: driver } })
+      ).toBe(before)
+      expect(
+        await prisma.notification.count({
+          where: { userId: { in: accounts.map((account) => account.id) } },
+        })
+      ).toBe(notificationCount)
+      await (completed ? completeRide() : startRide()).expect(200)
+    }
+  )
+  it.each([false, true])(
+    "сбой журнала откатывает жизненный цикл (завершение=%s)",
+    async (completed) => {
+      const id = await pending()
+      if (completed) {
+        await decide(id).expect(200)
+        await startRide().expect(200)
+      }
+      const original = prisma.$transaction.bind(prisma)
+      const spy = vi.spyOn(prisma, "$transaction").mockImplementationOnce(((
+        callback: (tx: Prisma.TransactionClient) => Promise<unknown>
+      ) =>
+        original(async (tx) =>
+          callback(
+            new Proxy(tx, {
+              get(target, property, receiver) {
+                if (property === "activityLog")
+                  return {
+                    ...target.activityLog,
+                    create: async (args: Prisma.ActivityLogCreateArgs) => {
+                      if (
+                        args.data.action ===
+                        (completed ? "ride.completed" : "ride.started")
+                      )
+                        throw new Error("audit unavailable")
+                      return target.activityLog.create(args)
+                    },
+                  }
+                return Reflect.get(target, property, receiver)
+              },
+            })
+          )
+        )) as typeof prisma.$transaction)
+      try {
+        await (completed ? completeRide() : startRide()).expect(503)
+      } finally {
+        spy.mockRestore()
+      }
+      expect(
+        (await prisma.ride.findUniqueOrThrow({ where: { id: rideId } })).status
+      ).toBe(completed ? "IN_PROGRESS" : "PUBLISHED")
+      expect(
+        (await prisma.booking.findUniqueOrThrow({ where: { id } })).status
+      ).toBe(completed ? "CONFIRMED" : "PENDING")
+      expect(
+        await prisma.activityLog.count({
+          where: {
+            resourceId: rideId,
+            action: completed ? "ride.completed" : "ride.started",
+          },
+        })
+      ).toBe(0)
+      expect(
+        await prisma.notification.count({
+          where: {
+            resourceId: rideId,
+            kind: completed ? "RIDE_COMPLETED" : "RIDE_STARTED",
+          },
+        })
+      ).toBe(0)
+    }
+  )
 })
