@@ -16,6 +16,7 @@ import {
 import { AppModule } from "../src/app.module.js"
 import { PrismaService } from "../src/prisma/prisma.service.js"
 import type { Prisma } from "../src/generated/prisma/client.js"
+import { START_REJECTION_REASON } from "../src/rides/ride-start.service.js"
 import { configureApp } from "../src/setup.js"
 import type {
   BookingStatus,
@@ -1784,22 +1785,52 @@ describe("Создание заявки и решения водителя (HTTP
     ).toEqual(paymentBefore)
     expect(await prisma.booking.count({ where: { rideId } })).toBe(1)
   })
-  it("на 02.1 ожидающая заявка блокирует старт без изменения резерва и платежа", async () => {
-    const id = await pending()
-    await startRide().expect(409)
-    expect(
-      await prisma.ride.findUnique({ where: { id: rideId } })
-    ).toMatchObject({ status: "PUBLISHED", startedAt: null })
-    expect(
-      (await prisma.booking.findUniqueOrThrow({ where: { id } })).status
-    ).toBe("PENDING")
-    expect(
-      (await prisma.payment.findUniqueOrThrow({ where: { bookingId: id } }))
-        .status
-    ).toBe("PENDING")
-    expect(await prisma.rideStatusEvent.count({ where: { rideId } })).toBe(0)
-    await decide(id).expect(200)
+  it("при старте отклоняет ожидающую заявку, освобождает резерв и отменяет неоплаченный платёж", async () => {
+    const id = await pending(3)
+    const requestKey = (
+      await prisma.booking.findUniqueOrThrow({ where: { id } })
+    ).requestKey
     await startRide().expect(200)
+    expect(await prisma.booking.findUnique({ where: { id } })).toMatchObject({
+      status: "REJECTED",
+      cancellationReason: START_REJECTION_REASON,
+    })
+    expect(
+      await prisma.payment.findUnique({ where: { bookingId: id } })
+    ).toMatchObject({ status: "CANCELLED", paidAt: null, refundedAt: null })
+    expect(
+      await prisma.bookingStatusEvent.findFirst({
+        where: { bookingId: id, toStatus: "REJECTED" },
+      })
+    ).toMatchObject({
+      actorId: driver,
+      fromStatus: "PENDING",
+      reason: START_REJECTION_REASON,
+    })
+    expect(
+      (
+        await prisma.booking.aggregate({
+          where: { rideId, status: { in: ["PENDING", "CONFIRMED"] } },
+          _sum: { seats: true },
+        })
+      )._sum.seats
+    ).toBeNull()
+    expect(
+      (await list("status=REJECTED").expect(200)).body.items[0]
+    ).toMatchObject({
+      cancellationReason: START_REJECTION_REASON,
+      payment: { status: "CANCELLED" },
+    })
+    expect(
+      (await driverList().expect(200)).body.items[0].ride.availableSeats
+    ).toBe(3)
+    const replay = await send({ seats: 3, requestKey }).expect(200)
+    expect(replay.body).toMatchObject({
+      id,
+      status: "REJECTED",
+      payment: { status: "CANCELLED" },
+    })
+    expect(await prisma.booking.count({ where: { rideId } })).toBe(1)
   })
   it.each(["DRAFT", "CANCELLED", "COMPLETED"] as RideStatus[])(
     "не начинает поездку %s",
@@ -1910,12 +1941,13 @@ describe("Создание заявки и решения водителя (HTTP
     const results = await Promise.all([startRide(), send()])
     expect([
       [200, 404],
-      [409, 201],
+      [200, 201],
     ]).toContainEqual(results.map((result) => result.status))
     const ride = await prisma.ride.findUniqueOrThrow({ where: { id: rideId } })
     expect(
       await prisma.booking.count({ where: { rideId, status: "PENDING" } })
-    ).toBe(ride.status === "IN_PROGRESS" ? 0 : 1)
+    ).toBe(0)
+    expect(ride.status).toBe("IN_PROGRESS")
   })
   it("ошибка после SQL-записи старта откатывает статус, время и событие", async () => {
     const original = prisma.$transaction.bind(prisma)
@@ -1949,5 +1981,271 @@ describe("Создание заявки и решения водителя (HTTP
       await prisma.ride.findUnique({ where: { id: rideId } })
     ).toMatchObject({ status: "PUBLISHED", startedAt: null })
     expect(await prisma.rideStatusEvent.count({ where: { rideId } })).toBe(0)
+  })
+  it("обрабатывает ожидающую заявку и сохраняет подтверждённую оплату", async () => {
+    const confirmed = await pending(1)
+    await decide(confirmed).expect(200)
+    const paymentBefore = await prisma.payment.findUniqueOrThrow({
+      where: { bookingId: confirmed },
+    })
+    const second = (
+      await send({ seats: 2, requestKey: randomUUID() }, 2).expect(201)
+    ).body.id
+    await startRide().expect(200)
+    expect(
+      (await prisma.booking.findUniqueOrThrow({ where: { id: confirmed } }))
+        .status
+    ).toBe("CONFIRMED")
+    expect(
+      await prisma.payment.findUniqueOrThrow({
+        where: { bookingId: confirmed },
+      })
+    ).toEqual(paymentBefore)
+    expect(
+      (await prisma.booking.findUniqueOrThrow({ where: { id: second } })).status
+    ).toBe("REJECTED")
+    expect(
+      (await driverList().expect(200)).body.items.every(
+        (item: { ride: { availableSeats: number } }) =>
+          item.ride.availableSeats === 2
+      )
+    ).toBe(true)
+  })
+  async function pendingPair() {
+    const first = await pending(2)
+    const second = (
+      await send({ seats: 1, requestKey: randomUUID() }, 2).expect(201)
+    ).body.id as string
+    return [first, second]
+  }
+  it("обрабатывает все PENDING в том числе нулевые платежи и просроченную поездку", async () => {
+    await prisma.ride.update({
+      where: { id: rideId },
+      data: { priceKopecks: 0 },
+    })
+    const ids = await pendingPair()
+    await prisma.ride.update({
+      where: { id: rideId },
+      data: { departureAt: new Date("2020-01-01") },
+    })
+    await startRide().expect(200)
+    for (const id of ids) {
+      expect(await prisma.booking.findUnique({ where: { id } })).toMatchObject({
+        status: "REJECTED",
+        cancellationReason: START_REJECTION_REASON,
+      })
+      expect(
+        await prisma.payment.findUnique({ where: { bookingId: id } })
+      ).toMatchObject({
+        amountKopecks: 0n,
+        status: "CANCELLED",
+        paidAt: null,
+        refundedAt: null,
+      })
+    }
+  })
+  it("параллельные и последовательные повторы не дублируют события и отмены платежей", async () => {
+    const ids = await pendingPair()
+    const results = await Promise.all([startRide(), startRide()])
+    expect(results.map((result) => result.status)).toEqual([200, 200])
+    expect(results[0]!.body).toEqual(results[1]!.body)
+    const countNotifications = await prisma.notification.count({
+      where: { userId: { in: accounts.map((account) => account.id) } },
+    })
+    const countLogs = await prisma.activityLog.count({
+      where: { actorId: driver },
+    })
+    await startRide().expect(200)
+    for (const id of ids)
+      expect(
+        await prisma.bookingStatusEvent.count({
+          where: { bookingId: id, toStatus: "REJECTED" },
+        })
+      ).toBe(1)
+    expect(
+      await prisma.rideStatusEvent.count({
+        where: { rideId, toStatus: "IN_PROGRESS" },
+      })
+    ).toBe(1)
+    expect(await prisma.activityLog.count({ where: { actorId: driver } })).toBe(
+      countLogs
+    )
+    expect(
+      await prisma.notification.count({
+        where: { userId: { in: accounts.map((account) => account.id) } },
+      })
+    ).toBe(countNotifications)
+  })
+  it("сохраняет историю ранее отклонённых и отменённых заявок", async () => {
+    const rejected = await pending()
+    await decide(rejected, "reject", { reason: "Другая причина" }).expect(200)
+    const cancelled = (
+      await send({ seats: 1, requestKey: randomUUID() }, 2).expect(201)
+    ).body.id
+    await cancel(cancelled, { reason: "Изменились планы" }, 2).expect(200)
+    const beforeBookings = await prisma.booking.findMany({
+      where: { rideId },
+      orderBy: { id: "asc" },
+    })
+    const beforePayments = await prisma.payment.findMany({
+      where: { booking: { rideId } },
+      orderBy: { id: "asc" },
+    })
+    await startRide().expect(200)
+    expect(
+      await prisma.booking.findMany({
+        where: { rideId },
+        orderBy: { id: "asc" },
+      })
+    ).toEqual(beforeBookings)
+    expect(
+      await prisma.payment.findMany({
+        where: { booking: { rideId } },
+        orderBy: { id: "asc" },
+      })
+    ).toEqual(beforePayments)
+  })
+  it("ошибка второго уведомления отменяет ранее обработанную заявку и весь старт", async () => {
+    const ids = await pendingPair(),
+      spy = failNotificationWrite(2)
+    const logsBefore = await prisma.activityLog.count({
+      where: { actorId: driver },
+    })
+    try {
+      await startRide().expect(503)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(
+      await prisma.ride.findUnique({ where: { id: rideId } })
+    ).toMatchObject({ status: "PUBLISHED", startedAt: null })
+    for (const id of ids) {
+      expect(
+        (await prisma.booking.findUniqueOrThrow({ where: { id } })).status
+      ).toBe("PENDING")
+      expect(
+        (await prisma.payment.findUniqueOrThrow({ where: { bookingId: id } }))
+          .status
+      ).toBe("PENDING")
+      expect(
+        await prisma.bookingStatusEvent.count({ where: { bookingId: id } })
+      ).toBe(1)
+    }
+    expect(await prisma.activityLog.count({ where: { actorId: driver } })).toBe(
+      logsBefore
+    )
+    expect(
+      await prisma.notification.count({
+        where: {
+          kind: "PAYMENT_UPDATED",
+          userId: { in: accounts.map((account) => account.id) },
+        },
+      })
+    ).toBe(0)
+    expect(await prisma.rideStatusEvent.count({ where: { rideId } })).toBe(0)
+    await startRide().expect(200)
+  })
+  it("сбой после записи статуса поездки откатывает уже отклонённые заявки и платежи", async () => {
+    const ids = await pendingPair(),
+      original = prisma.$transaction.bind(prisma)
+    const spy = vi.spyOn(prisma, "$transaction").mockImplementationOnce(((
+      callback: (tx: Prisma.TransactionClient) => Promise<unknown>
+    ) =>
+      original(async (tx) =>
+        callback(
+          new Proxy(tx, {
+            get(target, property, receiver) {
+              if (property === "ride")
+                return {
+                  ...target.ride,
+                  update: async (args: Prisma.RideUpdateArgs) => {
+                    await target.ride.update(args)
+                    throw new Error("failure after ride write")
+                  },
+                }
+              return Reflect.get(target, property, receiver)
+            },
+          })
+        )
+      )) as typeof prisma.$transaction)
+    try {
+      await startRide().expect(503)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(
+      await prisma.ride.findUnique({ where: { id: rideId } })
+    ).toMatchObject({ status: "PUBLISHED", startedAt: null })
+    for (const id of ids) {
+      expect(
+        (await prisma.booking.findUniqueOrThrow({ where: { id } })).status
+      ).toBe("PENDING")
+      expect(
+        (await prisma.payment.findUniqueOrThrow({ where: { bookingId: id } }))
+          .status
+      ).toBe("PENDING")
+      expect(
+        await prisma.bookingStatusEvent.count({ where: { bookingId: id } })
+      ).toBe(1)
+    }
+  })
+  it("не скрывает некорректный оплаченный платёж у PENDING и откатывает начало", async () => {
+    const ids = await pendingPair()
+    const ordered = await prisma.booking.findMany({
+      where: { id: { in: ids } },
+      orderBy: { id: "asc" },
+    })
+    await prisma.payment.update({
+      where: { bookingId: ordered[1]!.id },
+      data: { status: "SUCCEEDED", paidAt: new Date() },
+    })
+    await startRide().expect(409)
+    expect(
+      await prisma.ride.findUnique({ where: { id: rideId } })
+    ).toMatchObject({ status: "PUBLISHED", startedAt: null })
+    expect(
+      (
+        await prisma.payment.findUniqueOrThrow({
+          where: { bookingId: ordered[0]!.id },
+        })
+      ).status
+    ).toBe("PENDING")
+    expect(
+      await prisma.booking.count({ where: { rideId, status: "REJECTED" } })
+    ).toBe(0)
+  })
+  it("гонка старта и подтверждения сохраняет ровно одно решение по заявке", async () => {
+    const id = await pending(),
+      results = await Promise.all([startRide(), decide(id)])
+    expect(results[0]!.status).toBe(200)
+    expect([200, 409]).toContain(results[1]!.status)
+    const booking = await prisma.booking.findUniqueOrThrow({ where: { id } })
+    expect(["CONFIRMED", "REJECTED"]).toContain(booking.status)
+    expect(
+      (await prisma.payment.findUniqueOrThrow({ where: { bookingId: id } }))
+        .status
+    ).toBe(booking.status === "CONFIRMED" ? "SUCCEEDED" : "CANCELLED")
+    expect(
+      await prisma.bookingStatusEvent.count({ where: { bookingId: id } })
+    ).toBe(2)
+    expect(
+      (await prisma.ride.findUniqueOrThrow({ where: { id: rideId } })).status
+    ).toBe("IN_PROGRESS")
+  })
+  it("гонка старта и отмены пассажира не оставляет активный резерв или платёж", async () => {
+    const id = await pending(),
+      results = await Promise.all([startRide(), cancel(id)])
+    expect(results[0]!.status).toBe(200)
+    expect([200, 409]).toContain(results[1]!.status)
+    expect(["CANCELLED", "REJECTED"]).toContain(
+      (await prisma.booking.findUniqueOrThrow({ where: { id } })).status
+    )
+    expect(
+      (await prisma.payment.findUniqueOrThrow({ where: { bookingId: id } }))
+        .status
+    ).toBe("CANCELLED")
+    expect(
+      await prisma.bookingStatusEvent.count({ where: { bookingId: id } })
+    ).toBe(2)
   })
 })

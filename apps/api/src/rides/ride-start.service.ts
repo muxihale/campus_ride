@@ -1,3 +1,4 @@
+import { changePayment } from "../bookings/payment.js"
 import {
   ConflictException,
   HttpException,
@@ -8,6 +9,8 @@ import {
 } from "@nestjs/common"
 import { PrismaService } from "../prisma/prisma.service.js"
 import type { StartedRideDto } from "./ride-start.controller.js"
+export const START_REJECTION_REASON =
+  "Поездка началась без подтверждения заявки водителем."
 const select = { id: true, status: true, startedAt: true } as const
 @Injectable()
 export class RideStartService {
@@ -37,13 +40,29 @@ export class RideStartService {
           throw new ConflictException(
             "Начать можно только опубликованную поездку, которая ещё не началась"
           )
-        // На 02.2 эта проверка заменяется обработкой заявок внутри этой транзакции.
-        if (
-          await tx.booking.count({ where: { rideId: id, status: "PENDING" } })
-        )
-          throw new ConflictException(
-            "Сначала подтвердите или отклоните ожидающие заявки"
-          )
+        const pending = await tx.booking.findMany({
+          where: { rideId: id, status: "PENDING" },
+          orderBy: { id: "asc" },
+          select: { id: true },
+        })
+        for (const booking of pending) {
+          await changePayment(tx, booking.id, "CANCELLED", driverId)
+          await tx.booking.update({
+            where: { id: booking.id },
+            data: {
+              status: "REJECTED",
+              cancellationReason: START_REJECTION_REASON,
+              statusEvents: {
+                create: {
+                  actorId: driverId,
+                  fromStatus: "PENDING",
+                  toStatus: "REJECTED",
+                  reason: START_REJECTION_REASON,
+                },
+              },
+            },
+          })
+        }
         const updated = await tx.ride.update({
           where: { id },
           data: {
