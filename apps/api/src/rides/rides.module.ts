@@ -1,3 +1,5 @@
+import { RideStartController } from "./ride-start.controller.js"
+import { RideStartService } from "./ride-start.service.js"
 import { RideCancellationController } from "./ride-cancellation.controller.js"
 import { RideCancellationService } from "./ride-cancellation.service.js"
 import { Module } from "@nestjs/common"
@@ -17,11 +19,13 @@ import { RidesService } from "./rides.service.js"
     OwnRidesController,
     PublicSearchController,
     RideCancellationController,
+    RideStartController,
   ],
   providers: [
     RidesService,
     PublicSearchService,
     RideCancellationService,
+    RideStartService,
     TrustedOriginGuard,
   ],
 })

@@ -212,6 +212,7 @@ describe("Создание черновика поездки (HTTP + PostgreSQL)
       driverId: userId,
       status: "DRAFT",
       cancellationReason: null,
+      startedAt: null,
       stops: [],
       createdAt: expect.any(String),
       updatedAt: expect.any(String),
