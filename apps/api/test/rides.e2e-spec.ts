@@ -213,6 +213,7 @@ describe("Создание черновика поездки (HTTP + PostgreSQL)
       status: "DRAFT",
       cancellationReason: null,
       startedAt: null,
+      completedAt: null,
       stops: [],
       createdAt: expect.any(String),
       updatedAt: expect.any(String),

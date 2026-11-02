@@ -1,3 +1,5 @@
+import { RideCompletionController } from "./ride-completion.controller.js"
+import { RideCompletionService } from "./ride-completion.service.js"
 import { RideStartController } from "./ride-start.controller.js"
 import { RideStartService } from "./ride-start.service.js"
 import { RideCancellationController } from "./ride-cancellation.controller.js"
@@ -20,12 +22,14 @@ import { RidesService } from "./rides.service.js"
     PublicSearchController,
     RideCancellationController,
     RideStartController,
+    RideCompletionController,
   ],
   providers: [
     RidesService,
     PublicSearchService,
     RideCancellationService,
     RideStartService,
+    RideCompletionService,
     TrustedOriginGuard,
   ],
 })

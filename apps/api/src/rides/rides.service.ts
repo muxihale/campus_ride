@@ -28,6 +28,7 @@ const rideSelect = {
   conditions: true,
   status: true,
   startedAt: true,
+  completedAt: true,
   cancellationReason: true,
   createdAt: true,
   updatedAt: true,
@@ -43,6 +44,7 @@ function serialize(ride: StoredRide): RideDto {
     conditions: ride.conditions ?? "",
     departureAt: ride.departureAt.toISOString(),
     startedAt: ride.startedAt?.toISOString() ?? null,
+    completedAt: ride.completedAt?.toISOString() ?? null,
     createdAt: ride.createdAt.toISOString(),
     updatedAt: ride.updatedAt.toISOString(),
   }

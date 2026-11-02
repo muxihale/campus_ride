@@ -120,6 +120,8 @@ export class RideStopDto extends RideStopInputDto {
 export class RideDto extends OmitType(CreateRideDto, ["stops"] as const) {
   @ApiProperty({ type: String, format: "date-time", nullable: true })
   startedAt!: string | null
+  @ApiProperty({ type: String, format: "date-time", nullable: true })
+  completedAt!: string | null
   @ApiProperty({ type: String, nullable: true })
   cancellationReason!: string | null
   @ApiProperty({ type: String, format: "uuid" })
