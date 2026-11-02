@@ -2881,4 +2881,151 @@ describe("Создание заявки и решения водителя (HTTP
       ).toBe(0)
     }
   )
+  it("полный сценарий: черновик → публикация → поиск → бронь → подтверждение → старт → завершение → история", async () => {
+    const created = await request(app.getHttpServer())
+      .post("/api/rides")
+      .set("Cookie", accounts[0]!.cookie)
+      .set("Origin", origin)
+      .send({
+        vehicleId: vehicle,
+        originId: start,
+        destinationId: finish,
+        departureAt: "2099-11-09T03:00:00Z",
+        seatsTotal: 3,
+        priceKopecks: 15015,
+        conditions: "Встреча у метро Уралмаш, небольшой рюкзак разрешён.",
+      })
+      .expect(201)
+    rideId = created.body.id as string
+    rides.push(rideId)
+    expect(created.body.status).toBe("DRAFT")
+    await request(app.getHttpServer()).get(`/api/rides/${rideId}`).expect(404)
+    await request(app.getHttpServer())
+      .post(`/api/rides/${rideId}/publish`)
+      .set("Cookie", accounts[0]!.cookie)
+      .set("Origin", origin)
+      .send({})
+      .expect(200)
+    const search = await request(app.getHttpServer())
+      .get(
+        `/api/rides?originDistrictId=${district}&date=2099-11-09&timeFrom=07:00&timeTo=09:00&minSeats=2&maxPriceKopecks=16000&q=рюкзак`
+      )
+      .expect(200)
+    expect(search.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: rideId, availableSeats: 3 }),
+      ])
+    )
+    const detail = await request(app.getHttpServer())
+      .get(`/api/rides/${rideId}`)
+      .expect(200)
+    expect(detail.body).toMatchObject({
+      id: rideId,
+      priceKopecks: 15015,
+      availableSeats: 3,
+    })
+    const body = { seats: 2, requestKey: randomUUID() }
+    const booking = await send(body).expect(201)
+    expect(booking.body).toMatchObject({
+      status: "PENDING",
+      payment: { status: "PENDING", amountKopecks: 30030, isDemo: true },
+    })
+    const waiting = await send(
+      { seats: 1, requestKey: randomUUID() },
+      2
+    ).expect(201)
+    expect((await driverList(`rideId=${rideId}`).expect(200)).body.total).toBe(
+      2
+    )
+    await decide(booking.body.id).expect(200)
+    expect(
+      (await list("period=upcoming&status=CONFIRMED").expect(200)).body.items
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: booking.body.id,
+          payment: expect.objectContaining({
+            status: "SUCCEEDED",
+            amountKopecks: 30030,
+          }),
+        }),
+      ])
+    )
+    const started = await startRide().expect(200)
+    expect(
+      (await notifications("kind=RIDE_STARTED").expect(200)).body.total
+    ).toBe(1)
+    expect(
+      (await notifications("kind=BOOKING_REJECTED", 2).expect(200)).body.items
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          resourceId: waiting.body.id,
+          body: START_REJECTION_REASON,
+        }),
+      ])
+    )
+    await request(app.getHttpServer()).get(`/api/rides/${rideId}`).expect(404)
+    const completed = await completeRide().expect(200)
+    expect(completed.body.startedAt).toBe(started.body.startedAt)
+    const history = await list("period=history&status=COMPLETED").expect(200)
+    expect(history.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: booking.body.id,
+          status: "COMPLETED",
+          payment: expect.objectContaining({
+            status: "SUCCEEDED",
+            amountKopecks: 30030,
+          }),
+        }),
+      ])
+    )
+    expect((await list("period=upcoming").expect(200)).body.total).toBe(0)
+    expect(
+      (await driverList(`rideId=${rideId}&status=COMPLETED`).expect(200)).body
+        .total
+    ).toBe(1)
+    const inbox = await notifications("kind=RIDE_COMPLETED").expect(200)
+    expect(inbox.body.total).toBe(1)
+    await request(app.getHttpServer())
+      .patch(`/api/notifications/${inbox.body.items[0].id}/read`)
+      .set("Cookie", accounts[1]!.cookie)
+      .set("Origin", origin)
+      .send({})
+      .expect(200)
+    expect(
+      (await notifications("kind=RIDE_COMPLETED&read=true").expect(200)).body
+        .total
+    ).toBe(1)
+    const replay = await send(body).expect(200)
+    expect(replay.body).toMatchObject({
+      id: booking.body.id,
+      status: "COMPLETED",
+    })
+    expect((await completeRide().expect(200)).body).toEqual(completed.body)
+    await startRide().expect(409)
+    await cancel(booking.body.id).expect(409)
+    expect(
+      await prisma.payment.count({
+        where: { booking: { rideId }, status: "REFUNDED" },
+      })
+    ).toBe(0)
+    expect(
+      await prisma.rideStatusEvent.findMany({
+        where: { rideId },
+        orderBy: { createdAt: "asc" },
+        select: { toStatus: true },
+      })
+    ).toEqual([
+      { toStatus: "PUBLISHED" },
+      { toStatus: "IN_PROGRESS" },
+      { toStatus: "COMPLETED" },
+    ])
+    expect(
+      await prisma.notification.count({
+        where: { resourceId: rideId, kind: "RIDE_COMPLETED" },
+      })
+    ).toBe(2)
+  })
 })
