@@ -300,6 +300,7 @@ export function NotificationsScreen({ onExpired }: { onExpired: () => void }) {
                             "#/bookings",
                             "#/ride-bookings",
                             "#/driver",
+                            "#/reviews",
                           ].includes(item.link) && (
                             <a
                               href={item.link}

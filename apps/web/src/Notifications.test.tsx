@@ -170,3 +170,26 @@ it("сохраняет фильтры при пагинации и сбрасы�
     )
   )
 })
+
+it("уведомление об отзыве открывает раздел отзывов", async () => {
+  await start(
+    page([
+      {
+        ...item,
+        kind: "REVIEW_RECEIVED",
+        title: "Вы получили новый отзыв",
+        body: "Вас оценили как водителя. Оценка: 5 из 5.",
+        link: "#/reviews",
+        resourceType: "review",
+      },
+    ])
+  )
+  expect(
+    screen
+      .getByRole("link", { name: "Открыть связанный раздел" })
+      .getAttribute("href")
+  ).toBe("#/reviews")
+  expect(
+    screen.getByRole("heading", { name: "Вы получили новый отзыв" })
+  ).toBeTruthy()
+})

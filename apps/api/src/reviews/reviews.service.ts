@@ -59,7 +59,7 @@ export class ReviewsService {
           })
         )
           throw new ConflictException("Вы уже оставили отзыв по этой заявке")
-        return tx.review.create({
+        const review = await tx.review.create({
           data: {
             bookingId,
             authorId,
@@ -77,6 +77,32 @@ export class ReviewsService {
             createdAt: true,
           },
         })
+        await tx.activityLog.create({
+          data: {
+            actorId: authorId,
+            action: "review.created",
+            resourceType: "review",
+            resourceId: review.id,
+            details: {
+              bookingId,
+              recipientId,
+              rating: input.rating,
+              recipientRole: passenger ? "DRIVER" : "PASSENGER",
+            },
+          },
+        })
+        await tx.notification.create({
+          data: {
+            userId: recipientId,
+            kind: "REVIEW_RECEIVED",
+            title: "Вы получили новый отзыв",
+            body: `Вас оценили как ${passenger ? "водителя" : "пассажира"}. Оценка: ${input.rating} из 5.`,
+            resourceType: "review",
+            resourceId: review.id,
+            link: "#/reviews",
+          },
+        })
+        return review
       })
     } catch (error) {
       if (error instanceof HttpException) throw error

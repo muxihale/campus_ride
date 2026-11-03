@@ -3510,4 +3510,99 @@ describe("Создание заявки и решения водителя (HTTP
     await ownReviews("bookingId=bad").expect(400)
     await publicReviews(driver, `bookingId=${id}`).expect(400)
   })
+  it("отзыв атомарно уведомляет получателя и сохраняет автора в журнале без дублей", async () => {
+    const { first, second, id } = await reviewPair()
+    const received = await notifications("kind=REVIEW_RECEIVED", 0).expect(200)
+    expect(received.body.items).toEqual([
+      expect.objectContaining({
+        resourceId: first,
+        resourceType: "review",
+        link: "#/reviews",
+        body: "Вас оценили как водителя. Оценка: 5 из 5.",
+      }),
+    ])
+    expect(
+      (await notifications("kind=REVIEW_RECEIVED", 1).expect(200)).body.items
+    ).toEqual([
+      expect.objectContaining({
+        resourceId: second,
+        body: "Вас оценили как пассажира. Оценка: 3 из 5.",
+      }),
+    ])
+    expect(
+      (await notifications("kind=REVIEW_RECEIVED", 2).expect(200)).body.total
+    ).toBe(0)
+    expect(
+      await prisma.activityLog.findFirst({
+        where: { resourceId: first, action: "review.created" },
+      })
+    ).toMatchObject({
+      actorId: accounts[1]!.id,
+      resourceType: "review",
+      details: {
+        bookingId: id,
+        recipientId: driver,
+        recipientRole: "DRIVER",
+        rating: 5,
+      },
+    })
+    await review(id).expect(409)
+    expect(
+      await prisma.notification.count({ where: { resourceId: first } })
+    ).toBe(1)
+    expect(
+      await prisma.activityLog.count({
+        where: { resourceId: first, action: "review.created" },
+      })
+    ).toBe(1)
+  })
+  it("ошибка уведомления откатывает отзыв, рейтинг и журнал", async () => {
+    const id = await completedBooking()
+    const spy = failNotificationWrite()
+    try {
+      await review(id).expect(503)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(await prisma.review.count({ where: { bookingId: id } })).toBe(0)
+    expect(
+      await prisma.activityLog.count({
+        where: { actorId: accounts[1]!.id, action: "review.created" },
+      })
+    ).toBe(0)
+    expect((await ratings().expect(200)).body.driver.count).toBe(0)
+    await review(id).expect(201)
+  })
+  it("ошибка журнала откатывает отзыв без уведомления", async () => {
+    const id = await completedBooking()
+    const original = prisma.$transaction.bind(prisma)
+    const spy = vi.spyOn(prisma, "$transaction").mockImplementationOnce(((
+      callback: (tx: Prisma.TransactionClient) => Promise<unknown>
+    ) =>
+      original(async (tx) =>
+        callback(
+          new Proxy(tx, {
+            get(target, property, receiver) {
+              if (property === "activityLog")
+                return {
+                  ...target.activityLog,
+                  create: () => {
+                    throw new Error("audit unavailable")
+                  },
+                }
+              return Reflect.get(target, property, receiver)
+            },
+          })
+        )
+      )) as typeof prisma.$transaction)
+    try {
+      await review(id).expect(503)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(await prisma.review.count({ where: { bookingId: id } })).toBe(0)
+    expect(
+      (await notifications("kind=REVIEW_RECEIVED", 0).expect(200)).body.total
+    ).toBe(0)
+  })
 })
