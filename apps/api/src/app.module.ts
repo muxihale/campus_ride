@@ -1,3 +1,4 @@
+import { ReviewsModule } from "./reviews/reviews.module.js"
 import { NotificationsModule } from "./notifications/notifications.module.js"
 import { BookingsModule } from "./bookings/bookings.module.js"
 import { Module } from "@nestjs/common"
@@ -35,6 +36,7 @@ import { AuthModule } from "./auth/auth.module.js"
     RidesModule,
     BookingsModule,
     NotificationsModule,
+    ReviewsModule,
   ],
   controllers: [HealthController],
 })

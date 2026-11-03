@@ -101,6 +101,9 @@ describe("Создание заявки и решения водителя (HTTP
     await prisma.notification.deleteMany({
       where: { userId: { in: accounts.map((account) => account.id) } },
     })
+    await prisma.review.deleteMany({
+      where: { booking: { rideId: { in: rides } } },
+    })
     await prisma.bookingStatusEvent.deleteMany({
       where: { booking: { rideId: { in: rides } } },
     })
@@ -133,6 +136,9 @@ describe("Создание заявки и решения водителя (HTTP
         })
         await prisma.rideStatusEvent.deleteMany({
           where: { rideId: { in: rides } },
+        })
+        await prisma.review.deleteMany({
+          where: { booking: { rideId: { in: rides } } },
         })
         await prisma.bookingStatusEvent.deleteMany({
           where: { booking: { rideId: { in: rides } } },
@@ -3027,5 +3033,180 @@ describe("Создание заявки и решения водителя (HTTP
         where: { resourceId: rideId, kind: "RIDE_COMPLETED" },
       })
     ).toBe(2)
+  })
+  const review = (
+    id: string,
+    account = 1,
+    body: object = {
+      rating: 5,
+      comment: "  Водитель приехал вовремя, поездка комфортная.  ",
+    }
+  ) =>
+    request(app.getHttpServer())
+      .post(`/api/bookings/${id}/reviews`)
+      .set("Cookie", accounts[account]!.cookie)
+      .set("Origin", origin)
+      .send(body)
+  const completedBooking = async () => {
+    const id = await pending(1)
+    await decide(id).expect(200)
+    await startRide().expect(200)
+    await completeRide().expect(200)
+    return id
+  }
+  it("пассажир и водитель оставляют встречные отзывы с серверными участниками", async () => {
+    const id = await completedBooking()
+    const passenger = await review(id).expect(201)
+    expect(passenger.headers["cache-control"]).toBe("no-store")
+    expect(passenger.body).toEqual({
+      id: expect.any(String),
+      bookingId: id,
+      authorId: accounts[1]!.id,
+      recipientId: driver,
+      rating: 5,
+      comment: "Водитель приехал вовремя, поездка комфортная.",
+      createdAt: expect.any(String),
+    })
+    const driverReview = await review(id, 0, {
+      rating: 4,
+      comment: "Пассажир был на месте вовремя.",
+    }).expect(201)
+    expect(driverReview.body).toMatchObject({
+      authorId: driver,
+      recipientId: accounts[1]!.id,
+      rating: 4,
+    })
+    expect(await prisma.review.count({ where: { bookingId: id } })).toBe(2)
+    await review(id).expect(409)
+    await review(id, 0, { rating: 1, comment: "Изменённый отзыв" }).expect(409)
+  })
+  it("параллельные отзывы одного автора создают ровно одну запись", async () => {
+    const id = await completedBooking()
+    const results = await Promise.all([review(id), review(id)])
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409])
+    expect(await prisma.review.count({ where: { bookingId: id } })).toBe(1)
+  })
+  it("чужая и отсутствующая заявки одинаково недоступны, администратор не обходит права", async () => {
+    const id = await completedBooking()
+    const other = await review(id, 2).expect(404)
+    const missing = await review(randomUUID(), 2).expect(404)
+    expect(other.body.message).toBe(missing.body.message)
+    await review(id, 3).expect(403)
+  })
+  it("без сессии, с чужим Origin и неверным UUID отзыв недоступен", async () => {
+    const id = await completedBooking()
+    await request(app.getHttpServer())
+      .post(`/api/bookings/${id}/reviews`)
+      .set("Origin", origin)
+      .send({ rating: 5, comment: "Спасибо" })
+      .expect(401)
+    await request(app.getHttpServer())
+      .post(`/api/bookings/${id}/reviews`)
+      .set("Cookie", accounts[1]!.cookie)
+      .set("Origin", "https://example.org")
+      .send({ rating: 5, comment: "Спасибо" })
+      .expect(403)
+    await request(app.getHttpServer())
+      .post(`/api/bookings/${id}/reviews`)
+      .set("Cookie", accounts[1]!.cookie)
+      .send({ rating: 5, comment: "Спасибо" })
+      .expect(403)
+    await review("bad").expect(400)
+  })
+  it.each([
+    {},
+    { rating: 0, comment: "Спасибо" },
+    { rating: 6, comment: "Спасибо" },
+    { rating: 1.5, comment: "Спасибо" },
+    { rating: "5", comment: "Спасибо" },
+    { rating: 5, comment: "   " },
+    { rating: 5, comment: "а".repeat(1001) },
+    { rating: 5, comment: null },
+    { rating: 5, comment: 123 },
+    { rating: 5, comment: "Спасибо", authorId: randomUUID() },
+    { rating: 5, comment: "Спасибо", recipientId: randomUUID() },
+    { rating: 5, comment: "Спасибо", hiddenAt: null },
+  ])("отклоняет некорректное тело отзыва %j", async (body) => {
+    const id = await completedBooking()
+    await review(id, 1, body).expect(400)
+    expect(await prisma.review.count({ where: { bookingId: id } })).toBe(0)
+  })
+  it.each(["PENDING", "CONFIRMED", "REJECTED", "CANCELLED"] as BookingStatus[])(
+    "не принимает отзыв для заявки %s",
+    async (status) => {
+      const id = await completedBooking()
+      await prisma.booking.update({ where: { id }, data: { status } })
+      await review(id).expect(409)
+    }
+  )
+  it.each(["DRAFT", "PUBLISHED", "IN_PROGRESS", "CANCELLED"] as RideStatus[])(
+    "не принимает отзыв для поездки %s",
+    async (status) => {
+      const id = await completedBooking()
+      await prisma.ride.update({ where: { id: rideId }, data: { status } })
+      await review(id).expect(409)
+    }
+  )
+  it("проверяет время завершения и роль участника", async () => {
+    const id = await completedBooking()
+    for (const data of [
+      { startedAt: null },
+      {
+        startedAt: new Date("2099-01-01"),
+        completedAt: new Date("2099-02-01"),
+      },
+      { startedAt: new Date(), completedAt: new Date("2000-01-01") },
+    ]) {
+      await prisma.ride.update({ where: { id: rideId }, data })
+      await review(id).expect(409)
+    }
+    await prisma.userRole.delete({
+      where: { userId_role: { userId: driver, role: "DRIVER" } },
+    })
+    try {
+      await review(id, 0).expect(403)
+    } finally {
+      await prisma.userRole.create({ data: { userId: driver, role: "DRIVER" } })
+    }
+  })
+  it("скрытый отзыв также запрещает повторную оценку", async () => {
+    const id = await completedBooking()
+    const created = await review(id).expect(201)
+    await prisma.review.update({
+      where: { id: created.body.id },
+      data: { hiddenAt: new Date(), hiddenReason: "Проверка модерации" },
+    })
+    await review(id).expect(409)
+  })
+  it("сбой сохранения не создаёт отзыв и возвращает безопасную ошибку", async () => {
+    const id = await completedBooking()
+    const original = prisma.$transaction.bind(prisma)
+    const spy = vi.spyOn(prisma, "$transaction").mockImplementationOnce(((
+      callback: (tx: Prisma.TransactionClient) => Promise<unknown>
+    ) =>
+      original(async (tx) =>
+        callback(
+          new Proxy(tx, {
+            get(target, property, receiver) {
+              if (property === "review")
+                return {
+                  ...target.review,
+                  create: () => {
+                    throw new Error("secret database failure")
+                  },
+                }
+              return Reflect.get(target, property, receiver)
+            },
+          })
+        )
+      )) as typeof prisma.$transaction)
+    try {
+      const result = await review(id).expect(503)
+      expect(result.body.message).toBe("Создание отзыва временно недоступно")
+    } finally {
+      spy.mockRestore()
+    }
+    expect(await prisma.review.count({ where: { bookingId: id } })).toBe(0)
+    await review(id).expect(201)
   })
 })
