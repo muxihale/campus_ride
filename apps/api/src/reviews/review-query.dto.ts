@@ -5,6 +5,7 @@ import {
   IsInt,
   IsISO8601,
   IsOptional,
+  IsUUID,
   Matches,
   Max,
   Min,
@@ -51,6 +52,14 @@ export class ReviewsQueryDto extends PickType(RideQueryDto, [
   sort: "newest" | "oldest" = "newest"
 }
 export class OwnReviewsQueryDto extends ReviewsQueryDto {
+  @ApiPropertyOptional({
+    type: String,
+    format: "uuid",
+    description: "Только свои отзывы по конкретной заявке",
+  })
+  @IsOptional()
+  @IsUUID()
+  bookingId?: string
   @ApiPropertyOptional({ enum: ["received", "sent"], default: "received" })
   @IsIn(["received", "sent"])
   direction: "received" | "sent" = "received"

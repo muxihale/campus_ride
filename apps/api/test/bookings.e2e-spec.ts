@@ -3488,4 +3488,24 @@ describe("Создание заявки и решения водителя (HTTP
       listSpy.mockRestore()
     }
   })
+  it("фильтрует собственные отзывы по заявке без доступа к чужим данным", async () => {
+    const { id, first, second } = await reviewPair()
+    expect(
+      (await ownReviews(`direction=sent&bookingId=${id}`).expect(200)).body
+        .items
+    ).toEqual([expect.objectContaining({ id: first, bookingId: id })])
+    expect(
+      (await ownReviews(`bookingId=${id}`).expect(200)).body.items
+    ).toEqual([expect.objectContaining({ id: second })])
+    expect(
+      (await ownReviews(`direction=sent&bookingId=${id}`, 2).expect(200)).body
+        .total
+    ).toBe(0)
+    expect(
+      (await ownReviews(`direction=sent&bookingId=${randomUUID()}`).expect(200))
+        .body.total
+    ).toBe(0)
+    await ownReviews("bookingId=bad").expect(400)
+    await publicReviews(driver, `bookingId=${id}`).expect(400)
+  })
 })

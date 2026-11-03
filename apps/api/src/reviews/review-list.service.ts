@@ -45,6 +45,10 @@ export class ReviewListService {
         ? Prisma.sql`rv."authorId" = ${userId}::uuid`
         : Prisma.sql`rv."recipientId" = ${userId}::uuid`,
     ]
+    if (own && (query as OwnReviewsQueryDto).bookingId)
+      filters.push(
+        Prisma.sql`rv."bookingId" = ${(query as OwnReviewsQueryDto).bookingId}::uuid`
+      )
     if (!own) filters.push(Prisma.sql`u."status" = 'ACTIVE'`)
     if (query.recipientRole)
       filters.push(Prisma.sql`${role} = ${query.recipientRole}`)
