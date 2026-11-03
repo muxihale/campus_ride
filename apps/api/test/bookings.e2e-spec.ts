@@ -2889,7 +2889,8 @@ describe("Создание заявки и решения водителя (HTTP
       ).toBe(0)
     }
   )
-  it("полный сценарий: черновик → публикация → поиск → бронь → подтверждение → старт → завершение → история", async () => {
+  it("полный сценарий: черновик → публикация → поиск → бронь → подтверждение → старт → завершение → история → встречные отзывы", async () => {
+    const upcomingRideId = rideId
     const created = await request(app.getHttpServer())
       .post("/api/rides")
       .set("Cookie", accounts[0]!.cookie)
@@ -2959,6 +2960,11 @@ describe("Создание заявки и решения водителя (HTTP
         }),
       ])
     )
+    await review(booking.body.id).expect(409)
+    expect((await ratings().expect(200)).body.driver).toEqual({
+      average: null,
+      count: 0,
+    })
     const started = await startRide().expect(200)
     expect(
       (await notifications("kind=RIDE_STARTED").expect(200)).body.total
@@ -3033,6 +3039,69 @@ describe("Создание заявки и решения водителя (HTTP
     expect(
       await prisma.notification.count({
         where: { resourceId: rideId, kind: "RIDE_COMPLETED" },
+      })
+    ).toBe(2)
+    const passengerReview = await review(booking.body.id).expect(201)
+    const driverReview = await review(booking.body.id, 0, {
+      rating: 4,
+      comment: "Пассажир пришёл вовремя.",
+    }).expect(201)
+    expect((await ratings().expect(200)).body).toEqual({
+      driver: { average: 5, count: 1 },
+      passenger: { average: null, count: 0 },
+    })
+    expect((await ratings(accounts[1]!.id).expect(200)).body).toEqual({
+      driver: { average: null, count: 0 },
+      passenger: { average: 4, count: 1 },
+    })
+    const card = await request(app.getHttpServer())
+      .get(`/api/rides/${upcomingRideId}`)
+      .expect(200)
+    expect(card.body.driver).toMatchObject({
+      id: driver,
+      rating: 5,
+      reviewCount: 1,
+    })
+    expect(
+      (
+        await ownReviews(`direction=sent&bookingId=${booking.body.id}`).expect(
+          200
+        )
+      ).body.items
+    ).toEqual([
+      expect.objectContaining({ id: passengerReview.body.id, rating: 5 }),
+    ])
+    expect(
+      (
+        await ownReviews(
+          `direction=received&bookingId=${booking.body.id}`
+        ).expect(200)
+      ).body.items
+    ).toEqual([
+      expect.objectContaining({ id: driverReview.body.id, rating: 4 }),
+    ])
+    expect(
+      (await notifications("kind=REVIEW_RECEIVED", 0).expect(200)).body.items[0]
+    ).toMatchObject({ resourceId: passengerReview.body.id, link: "#/reviews" })
+    expect(
+      (await notifications("kind=REVIEW_RECEIVED", 1).expect(200)).body.items[0]
+    ).toMatchObject({ resourceId: driverReview.body.id, link: "#/reviews" })
+    await review(booking.body.id).expect(409)
+    await review(booking.body.id, 0).expect(409)
+    await review(booking.body.id, 2).expect(404)
+    await review(waiting.body.id, 2).expect(409)
+    expect(
+      await prisma.review.count({ where: { bookingId: booking.body.id } })
+    ).toBe(2)
+    const ids = [passengerReview.body.id, driverReview.body.id]
+    expect(
+      await prisma.notification.count({
+        where: { resourceId: { in: ids }, kind: "REVIEW_RECEIVED" },
+      })
+    ).toBe(2)
+    expect(
+      await prisma.activityLog.count({
+        where: { resourceId: { in: ids }, action: "review.created" },
       })
     ).toBe(2)
   })
