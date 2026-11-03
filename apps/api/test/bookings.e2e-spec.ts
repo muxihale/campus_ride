@@ -150,7 +150,9 @@ describe("Создание заявки и решения водителя (HTTP
         await prisma.ride.deleteMany({ where: { id: { in: rides } } })
         if (driver) {
           await prisma.vehicle.deleteMany({ where: { driverId: driver } })
-          await prisma.driverProfile.deleteMany({ where: { userId: driver } })
+          await prisma.driverProfile.deleteMany({
+            where: { userId: { in: accounts.map((account) => account.id) } },
+          })
         }
         await prisma.user.deleteMany({
           where: { email: { endsWith: `@${domain}` } },
@@ -3208,5 +3210,282 @@ describe("Создание заявки и решения водителя (HTTP
     }
     expect(await prisma.review.count({ where: { bookingId: id } })).toBe(0)
     await review(id).expect(201)
+  })
+  const ownReviews = (query = "", account = 1) =>
+    request(app.getHttpServer())
+      .get(`/api/me/reviews?${query}`)
+      .set("Cookie", accounts[account]!.cookie)
+  const publicReviews = (userId = driver, query = "") =>
+    request(app.getHttpServer()).get(`/api/users/${userId}/reviews?${query}`)
+  const ratings = (userId = driver) =>
+    request(app.getHttpServer()).get(`/api/users/${userId}/ratings`)
+  const reviewPair = async () => {
+    const id = await completedBooking()
+    const first = (await review(id).expect(201)).body.id as string
+    const second = (
+      await review(id, 0, {
+        rating: 3,
+        comment: "Пассажир приехал вовремя.",
+      }).expect(201)
+    ).body.id as string
+    return { id, first, second }
+  }
+  it("выдаёт свои отправленные/полученные отзывы и безопасный публичный список", async () => {
+    const { id, first, second } = await reviewPair()
+    const received = await ownReviews().expect(200)
+    expect(received.headers["cache-control"]).toBe("no-store")
+    expect(received.body.items).toEqual([
+      expect.objectContaining({
+        id: second,
+        bookingId: id,
+        recipientRole: "PASSENGER",
+      }),
+    ])
+    expect((await ownReviews("direction=sent").expect(200)).body.items).toEqual(
+      [expect.objectContaining({ id: first, recipientRole: "DRIVER" })]
+    )
+    expect((await ownReviews("", 2).expect(200)).body.total).toBe(0)
+    expect((await ownReviews("", 3).expect(200)).body.total).toBe(0)
+    const visible = await publicReviews().expect(200)
+    expect(visible.body.items).toEqual([
+      {
+        id: first,
+        rating: 5,
+        comment: "Водитель приехал вовремя, поездка комфортная.",
+        createdAt: expect.any(String),
+        recipientRole: "DRIVER",
+        author: { id: accounts[1]!.id, fullName: "Анна Соколова" },
+        recipient: { id: driver, fullName: "Анна Соколова" },
+      },
+    ])
+    expect(JSON.stringify(visible.body)).not.toMatch(
+      /bookingId|password|email|phone|hiddenReason|hiddenAt|requestKey/
+    )
+    await request(app.getHttpServer()).get("/api/me/reviews").expect(401)
+  })
+  it("объединяет поиск и пять фильтров, проверяет диапазоны и пустую страницу", async () => {
+    const { first } = await reviewPair()
+    const time = "2026-01-01T12:00:00Z"
+    await prisma.review.update({
+      where: { id: first },
+      data: { createdAt: new Date(time) },
+    })
+    const query =
+      "q=комфортная&recipientRole=DRIVER&ratingMin=4&ratingMax=5&dateFrom=2026-01-01T00:00:00Z&dateTo=2026-01-02T00:00:00Z"
+    expect((await publicReviews(driver, query).expect(200)).body.total).toBe(1)
+    expect(
+      (await ownReviews(`direction=sent&${query}`).expect(200)).body.total
+    ).toBe(1)
+    for (const extra of [
+      "q=несуществующий",
+      "recipientRole=PASSENGER",
+      "ratingMax=4",
+      "dateFrom=2027-01-01T00:00:00Z",
+    ])
+      expect((await publicReviews(driver, extra).expect(200)).body.total).toBe(
+        0
+      )
+    expect((await publicReviews(driver, "q=Анна").expect(200)).body.total).toBe(
+      1
+    )
+    expect((await publicReviews(driver, "q=%").expect(200)).body.total).toBe(0)
+    expect(
+      (await publicReviews(driver, "page=99&pageSize=1").expect(200)).body
+    ).toMatchObject({ items: [], total: 1, page: 99, pageSize: 1 })
+    for (const query of [
+      "ratingMin=5&ratingMax=1",
+      "dateFrom=2027-01-01T00:00:00Z&dateTo=2026-01-01T00:00:00Z",
+    ]) {
+      await publicReviews(driver, query).expect(400)
+      await ownReviews(query).expect(400)
+    }
+  })
+  it("стабильно сортирует одинаковые даты и разбивает список на страницы", async () => {
+    const { first, id } = await reviewPair()
+    const booking = await prisma.booking.create({
+      data: {
+        rideId,
+        passengerId: accounts[2]!.id,
+        requestKey: randomUUID(),
+        seats: 1,
+        unitPriceKopecks: 15015,
+        status: "COMPLETED",
+      },
+    })
+    const second = (
+      await review(booking.id, 2, {
+        rating: 4,
+        comment: "Удобная поездка",
+      }).expect(201)
+    ).body.id as string
+    const time = new Date("2026-01-01T12:00:00Z")
+    await prisma.review.updateMany({
+      where: { id: { in: [first, second] } },
+      data: { createdAt: time },
+    })
+    const ordered = [first, second].sort()
+    for (const [index, expected] of ordered.entries())
+      expect(
+        (
+          await publicReviews(
+            driver,
+            `sort=oldest&pageSize=1&page=${index + 1}`
+          ).expect(200)
+        ).body.items[0].id
+      ).toBe(expected)
+    expect(
+      (await publicReviews(driver).expect(200)).body.items.map(
+        (item: { id: string }) => item.id
+      )
+    ).toEqual([...ordered].reverse())
+    expect((await ratings().expect(200)).body).toEqual({
+      driver: { average: 4.5, count: 2 },
+      passenger: { average: null, count: 0 },
+    })
+    expect((await ratings(accounts[1]!.id).expect(200)).body.passenger).toEqual(
+      { average: 3, count: 1 }
+    )
+    expect(id).not.toBe(booking.id)
+  })
+  it("разделяет рейтинги одного пользователя в двух ролях", async () => {
+    await reviewPair()
+    await prisma.driverProfile.upsert({
+      where: { userId: accounts[1]!.id },
+      create: { userId: accounts[1]!.id },
+      update: {},
+    })
+    const reverse = await prisma.ride.create({
+      data: {
+        driverId: accounts[1]!.id,
+        vehicleId: vehicle,
+        originId: start,
+        destinationId: finish,
+        departureAt: new Date("2020-01-01"),
+        seatsTotal: 3,
+        priceKopecks: 15015,
+        status: "COMPLETED",
+        startedAt: new Date("2020-01-01"),
+        completedAt: new Date("2020-01-02"),
+      },
+    })
+    rides.push(reverse.id)
+    const booking = await prisma.booking.create({
+      data: {
+        rideId: reverse.id,
+        passengerId: driver,
+        requestKey: randomUUID(),
+        seats: 1,
+        unitPriceKopecks: 15015,
+        status: "COMPLETED",
+      },
+    })
+    await prisma.review.create({
+      data: {
+        bookingId: booking.id,
+        authorId: accounts[1]!.id,
+        recipientId: driver,
+        rating: 2,
+        comment: "Оценка пассажира",
+      },
+    })
+    expect((await ratings().expect(200)).body).toEqual({
+      driver: { average: 5, count: 1 },
+      passenger: { average: 2, count: 1 },
+    })
+    expect(
+      (await publicReviews(driver, "recipientRole=PASSENGER").expect(200)).body
+        .items[0].rating
+    ).toBe(2)
+  })
+  it("скрытие и некорректные исторические участники исключаются из списков и рейтинга", async () => {
+    const { first, id } = await reviewPair()
+    await prisma.review.update({
+      where: { id: first },
+      data: { hiddenAt: new Date(), hiddenReason: "Модерация" },
+    })
+    expect((await publicReviews().expect(200)).body.total).toBe(0)
+    expect((await ownReviews("direction=sent").expect(200)).body.total).toBe(0)
+    expect((await ratings().expect(200)).body.driver).toEqual({
+      average: null,
+      count: 0,
+    })
+    await prisma.review.update({
+      where: { id: first },
+      data: { hiddenAt: null, authorId: accounts[2]!.id },
+    })
+    expect((await ratings().expect(200)).body.driver.count).toBe(0)
+    await prisma.review.update({
+      where: { id: first },
+      data: { authorId: accounts[1]!.id },
+    })
+    await prisma.booking.update({
+      where: { id },
+      data: { status: "CANCELLED" },
+    })
+    expect((await publicReviews().expect(200)).body.total).toBe(0)
+  })
+  it("отсутствующий и заблокированный получатель скрыты за 404", async () => {
+    for (const id of [randomUUID(), driver]) {
+      if (id === driver)
+        await prisma.user.update({ where: { id }, data: { status: "BLOCKED" } })
+      try {
+        await publicReviews(id).expect(404)
+        await ratings(id).expect(404)
+      } finally {
+        if (id === driver)
+          await prisma.user.update({
+            where: { id },
+            data: { status: "ACTIVE" },
+          })
+      }
+    }
+    await publicReviews("bad").expect(400)
+    await ratings("bad").expect(400)
+    expect((await ratings(accounts[2]!.id).expect(200)).body).toEqual({
+      driver: { average: null, count: 0 },
+      passenger: { average: null, count: 0 },
+    })
+  })
+  it.each([
+    "recipientRole=ADMIN",
+    "ratingMin=0",
+    "ratingMax=6",
+    "ratingMin=1.5",
+    "dateFrom=oops",
+    "dateTo=2026-01-01",
+    "page=0",
+    "pageSize=101",
+    "sort=rating",
+    "unknown=x",
+  ])("отклоняет неверные параметры отзывов %s", async (query) => {
+    await publicReviews(driver, query).expect(400)
+    await ownReviews(query).expect(400)
+  })
+  it("публичный список не принимает direction и собственный — чужой userId", async () => {
+    await publicReviews(driver, "direction=sent").expect(400)
+    await ownReviews(`userId=${driver}`).expect(400)
+    await ownReviews("direction=bad").expect(400)
+  })
+  it("при ошибке чтения возвращает безопасный 503", async () => {
+    const spy = vi
+      .spyOn(prisma, "$transaction")
+      .mockRejectedValueOnce(new Error("secret failure"))
+    try {
+      expect((await ratings().expect(503)).body.message).toBe(
+        "Отзывы временно недоступны"
+      )
+    } finally {
+      spy.mockRestore()
+    }
+    const listSpy = vi
+      .spyOn(prisma, "$transaction")
+      .mockRejectedValueOnce(new Error("secret failure"))
+    try {
+      expect((await ownReviews().expect(503)).body.message).toBe(
+        "Отзывы временно недоступны"
+      )
+    } finally {
+      listSpy.mockRestore()
+    }
   })
 })
