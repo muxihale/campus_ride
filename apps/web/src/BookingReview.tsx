@@ -7,15 +7,19 @@ import { ekaterinburgInput } from "./ride-form"
 type Review = { id: string; rating: number; comment: string; createdAt: string }
 const field =
   "mt-2 w-full min-w-0 rounded-lg border border-input bg-background px-3 py-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-export function PassengerReview({
+export function BookingReview({
   bookingId,
-  driverName,
+  recipientName,
+  recipientRole,
   onExpired,
 }: {
   bookingId: string
-  driverName: string
+  recipientName: string
+  recipientRole: "DRIVER" | "PASSENGER"
   onExpired: () => void
 }) {
+  const passenger = recipientRole === "PASSENGER"
+  const action = passenger ? "Оценить пассажира" : "Оценить водителя"
   const [revision, setRevision] = useState(0)
   const [lookup, setLookup] = useState<{
     revision: number
@@ -109,9 +113,11 @@ export function PassengerReview({
   return (
     <section
       className="min-w-0 space-y-3 rounded-xl border bg-muted/30 p-4"
-      aria-label={`Отзыв водителю ${driverName}`}
+      aria-label={`Отзыв ${passenger ? "пассажиру" : "водителю"} ${recipientName}`}
     >
-      <h3 className="font-semibold">Ваша оценка водителя</h3>
+      <h3 className="font-semibold">
+        Ваша оценка {passenger ? "пассажира" : "водителя"}
+      </h3>
       {review ? (
         <>
           {saved && <p role="status">Отзыв отправлен. Спасибо за оценку!</p>}
@@ -143,15 +149,16 @@ export function PassengerReview({
         <form
           onSubmit={submit}
           className="space-y-4"
-          aria-label="Оценить водителя"
+          aria-label={action}
           noValidate
         >
           <p className="text-sm break-words">
-            Водитель: {driverName}. Отзыв можно отправить один раз.
+            {passenger ? "Пассажир" : "Водитель"}: {recipientName}. Отзыв можно
+            отправить один раз.
           </p>
           <fieldset disabled={pending} className="space-y-4">
             <label className="block text-sm font-medium">
-              Оценка водителя
+              Оценка {passenger ? "пассажира" : "водителя"}
               <select
                 className={field}
                 value={rating}
@@ -209,7 +216,7 @@ export function PassengerReview({
         </form>
       ) : (
         <Button variant="outline" onClick={() => setOpen(true)}>
-          Оценить водителя
+          {action}
         </Button>
       )}
     </section>

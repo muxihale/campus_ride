@@ -3085,7 +3085,9 @@ describe("Создание заявки и решения водителя (HTTP
   it("параллельные отзывы одного автора создают ровно одну запись", async () => {
     const id = await completedBooking()
     const results = await Promise.all([review(id), review(id)])
-    expect(results.map((r) => r.status).sort()).toEqual([201, 409])
+    expect(results.map((r) => r.status).sort((a, b) => a - b)).toEqual([
+      201, 409,
+    ])
     expect(await prisma.review.count({ where: { bookingId: id } })).toBe(1)
   })
   it("чужая и отсутствующая заявки одинаково недоступны, администратор не обходит права", async () => {

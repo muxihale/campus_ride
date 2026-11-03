@@ -1,4 +1,4 @@
-import { PassengerReview } from "./PassengerReview"
+import { BookingReview } from "./BookingReview"
 import { PaymentInfo, type DemoPayment } from "./PaymentInfo"
 import { useEffect, useRef, useState, type FormEvent } from "react"
 import { Button } from "@workspace/ui/components/button"
@@ -526,12 +526,18 @@ export function BookingsScreen({
                         Номер заявки: {item.id}
                       </p>
                       <PaymentInfo payment={item.payment} />
-                      {!driver &&
+                      {(!driver || item.passenger) &&
                         item.status === "COMPLETED" &&
                         item.ride.status === "COMPLETED" && (
-                          <PassengerReview
+                          <BookingReview
+                            key={`${driver ? "driver" : "passenger"}-${item.id}`}
                             bookingId={item.id}
-                            driverName={item.ride.driver.fullName}
+                            recipientRole={driver ? "PASSENGER" : "DRIVER"}
+                            recipientName={
+                              driver
+                                ? item.passenger!.fullName
+                                : item.ride.driver.fullName
+                            }
                             onExpired={onExpired}
                           />
                         )}
