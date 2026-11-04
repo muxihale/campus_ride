@@ -3757,7 +3757,7 @@ describe("Создание заявки и решения водителя (HTTP
         .body
     ).toMatchObject({ items: [], total: 2, page: 99 })
   })
-  it("скрытие и восстановление меняют оба рейтинга и публичную карточку без удаления отзыва", async () => {
+  it("полный административный сценарий: скрытие → рейтинги → публичная карточка → восстановление → уведомления и история", async () => {
     const { first, second, id } = await reviewPair()
     const upcoming = await prisma.ride.create({
       data: {
@@ -3772,6 +3772,10 @@ describe("Создание заявки и решения водителя (HTTP
       },
     })
     rides.push(upcoming.id)
+    expect(
+      (await adminReviews(`bookingId=${id}&hidden=false`).expect(200)).body
+        .total
+    ).toBe(2)
     const hide = await moderate(first).expect(200)
     expect(hide.body).toMatchObject({
       id: first,
@@ -3847,6 +3851,25 @@ describe("Создание заявки и решения водителя (HTTP
           where: { resourceId: first, userId, kind: "SYSTEM" },
         })
       ).toBe(2)
+    const audit = await adminActivity(
+      `resourceType=review&resourceId=${first}&sort=oldest`
+    ).expect(200)
+    expect(
+      audit.body.items.map((item: { action: string }) => item.action)
+    ).toEqual(["review.hidden", "review.restored"])
+    expect(
+      (await adminReviews(`bookingId=${id}&hidden=false`).expect(200)).body
+        .total
+    ).toBe(2)
+    const adminInbox = await notifications(
+      "kind=SYSTEM&resourceType=review",
+      3
+    ).expect(200)
+    expect(
+      adminInbox.body.items.every(
+        (item: { link: string }) => item.link === "#/admin/reviews"
+      )
+    ).toBe(true)
   })
   it("параллельное скрытие и повторные команды не дублируют уведомления и сохраняют первую причину", async () => {
     const { first } = await reviewPair()

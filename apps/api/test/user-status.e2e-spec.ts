@@ -672,4 +672,121 @@ describe("Блокировка пользователей (HTTP + PostgreSQL)", 
       })
     }
   })
+  it("полный административный сценарий: поиск → блокировка → отказ в доступе → возврат → разблокировка → новый вход → история", async () => {
+    const r = await ride()
+    const created = await request(app.getHttpServer())
+      .post(`/api/rides/${r.id}/bookings`)
+      .set("Cookie", accounts[2]!.cookie)
+      .set("Origin", origin)
+      .send({ seats: 1, requestKey: randomUUID() })
+      .expect(201)
+    await request(app.getHttpServer())
+      .post(`/api/bookings/${created.body.id}/confirm`)
+      .set("Cookie", accounts[1]!.cookie)
+      .set("Origin", origin)
+      .send({})
+      .expect(200)
+    const found = await request(app.getHttpServer())
+      .get(
+        `/api/admin/users?q=${encodeURIComponent(`2@${domain}`)}&role=PASSENGER&status=ACTIVE`
+      )
+      .set("Cookie", accounts[0]!.cookie)
+      .expect(200)
+    expect(found.body.items.map((user: { id: string }) => user.id)).toEqual([
+      accounts[2]!.id,
+    ])
+    await request(app.getHttpServer())
+      .post(`/api/admin/users/${accounts[2]!.id}/block`)
+      .set("Cookie", accounts[1]!.cookie)
+      .set("Origin", origin)
+      .send({ reason: "Проверка" })
+      .expect(403)
+    expect((await change().expect(200)).body).toMatchObject({
+      cancelledBookings: 1,
+      revokedSessions: 1,
+    })
+    await request(app.getHttpServer())
+      .get("/api/me/bookings")
+      .set("Cookie", accounts[2]!.cookie)
+      .expect(401)
+    await request(app.getHttpServer())
+      .post("/api/auth/login")
+      .set("Origin", origin)
+      .send({ email: `2@${domain}`, password })
+      .expect(401)
+    const driverList = await request(app.getHttpServer())
+      .get(`/api/me/ride-bookings?rideId=${r.id}`)
+      .set("Cookie", accounts[1]!.cookie)
+      .expect(200)
+    expect(driverList.body.items[0]).toMatchObject({
+      id: created.body.id,
+      status: "CANCELLED",
+      payment: { status: "REFUNDED", amountKopecks: 15000 },
+    })
+    expect((await change().expect(200)).body.changed).toBe(false)
+    await change(2, "unblock", { reason: "Проверка завершена" }).expect(200)
+    await request(app.getHttpServer())
+      .get("/api/auth/me")
+      .set("Cookie", accounts[2]!.cookie)
+      .expect(401)
+    const login = await request(app.getHttpServer())
+      .post("/api/auth/login")
+      .set("Origin", origin)
+      .send({ email: `2@${domain}`, password })
+      .expect(200)
+    const cookie = (
+      login.headers["set-cookie"] as unknown as string[]
+    )[0]!.split(";")[0]!
+    const history = await request(app.getHttpServer())
+      .get("/api/me/bookings?period=history&status=CANCELLED")
+      .set("Cookie", cookie)
+      .expect(200)
+    expect(history.body.items[0]).toMatchObject({
+      id: created.body.id,
+      payment: { status: "REFUNDED" },
+    })
+    const inbox = await request(app.getHttpServer())
+      .get("/api/notifications?kind=SYSTEM&resourceType=user")
+      .set("Cookie", cookie)
+      .expect(200)
+    expect(inbox.body.total).toBe(2)
+    const audit = await request(app.getHttpServer())
+      .get(
+        `/api/admin/activity?resourceType=user&resourceId=${accounts[2]!.id}&sort=oldest`
+      )
+      .set("Cookie", accounts[0]!.cookie)
+      .expect(200)
+    expect(
+      audit.body.items.map((item: { action: string }) => item.action)
+    ).toEqual(["user.blocked", "user.unblocked"])
+    expect(
+      await prisma.activityLog.count({
+        where: { actorId: accounts[0]!.id, action: "payment.refunded" },
+      })
+    ).toBe(1)
+  })
+  it("Swagger описывает административные команды с обязательной причиной", async () => {
+    const document = (
+      await request(app.getHttpServer()).get("/api/docs-json").expect(200)
+    ).body
+    for (const path of [
+      "/api/admin/users/{id}/block",
+      "/api/admin/users/{id}/unblock",
+      "/api/admin/reviews/{id}/hide",
+      "/api/admin/reviews/{id}/restore",
+    ]) {
+      expect(document.paths[path].post.security).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ campusride_session: [] }),
+        ])
+      )
+      expect(
+        document.paths[path].post.requestBody.content["application/json"].schema
+          .$ref
+      ).toMatch(/ChangeUserStatusDto|ModerateReviewDto/)
+    }
+    for (const schema of ["ChangeUserStatusDto", "ModerateReviewDto"])
+      expect(document.components.schemas[schema].required).toContain("reason")
+    expect(document.paths["/api/admin/activity"].get).toBeTruthy()
+  })
 })
