@@ -1,3 +1,4 @@
+import { AdminUsersScreen } from "./AdminUsers"
 import { ReviewsScreen } from "./Reviews"
 import { NotificationsScreen } from "./Notifications"
 import { BookingsScreen } from "./Bookings"
@@ -62,6 +63,9 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
         </p>
         {[
           ...available,
+          ...(user.roles.includes("ADMIN")
+            ? [{ path: "admin/users", label: "Пользователи" }]
+            : []),
           ...(user.roles.includes("PASSENGER")
             ? [{ path: "bookings", label: "Мои заявки" }]
             : []),
@@ -93,7 +97,10 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
           </a>
         ))}
       </nav>
-      {current === "reviews" ? (
+      {(current === "admin" || current === "admin/users") &&
+      user.roles.includes("ADMIN") ? (
+        <AdminUsersScreen userId={user.id} onExpired={onExpired} />
+      ) : current === "reviews" ? (
         <ReviewsScreen userId={user.id} onExpired={onExpired} />
       ) : current === "notifications" ? (
         <NotificationsScreen onExpired={onExpired} />
