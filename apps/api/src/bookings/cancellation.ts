@@ -6,7 +6,8 @@ export async function cancelReservation(
   actorId: string,
   reason: string | null,
   driverId: string,
-  rideCancelled = false
+  rideCancelled = false,
+  administrative = false
 ) {
   await changePayment(
     tx,
@@ -42,9 +43,13 @@ export async function cancelReservation(
     data: {
       userId: rideCancelled ? booking.passengerId : driverId,
       kind: rideCancelled ? "RIDE_CANCELLED" : "BOOKING_CANCELLED",
-      title: rideCancelled
-        ? "Водитель отменил поездку"
-        : "Пассажир отменил заявку",
+      title: administrative
+        ? rideCancelled
+          ? "Поездка отменена администратором"
+          : "Заявка отменена администратором"
+        : rideCancelled
+          ? "Водитель отменил поездку"
+          : "Пассажир отменил заявку",
       body: `${reason ? `Причина: ${reason}. ` : ""}Места освобождены. Если демонстрационный платёж был выполнен, сумма полностью возвращена. Реальные деньги не используются.`,
       resourceType: "booking",
       resourceId: booking.id,

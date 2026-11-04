@@ -1,3 +1,4 @@
+import { lockActiveUser } from "../auth/active-user.js"
 import { cancelReservation } from "./cancellation.js"
 import { changePayment, paymentSelect, serializePayment } from "./payment.js"
 import {
@@ -40,6 +41,7 @@ export class BookingsService {
     const requestKey = input.requestKey.toLowerCase()
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await lockActiveUser(tx, passengerId)
         const locked = await tx.$queryRaw<
           { id: string }[]
         >`SELECT "id" FROM "Ride" WHERE "id" = ${rideId}::uuid FOR UPDATE`
@@ -159,6 +161,7 @@ export class BookingsService {
   ): Promise<BookingDecisionDto> {
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await lockActiveUser(tx, driverId)
         // Сначала блокируется поездка, как и при создании заявки.
         const locked = await tx.$queryRaw<
           { id: string }[]
@@ -245,6 +248,7 @@ export class BookingsService {
   ): Promise<BookingDecisionDto> {
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await lockActiveUser(tx, passengerId)
         const locked = await tx.$queryRaw<
           { id: string }[]
         >`SELECT r."id" FROM "Ride" r JOIN "Booking" b ON b."rideId" = r."id" WHERE b."id" = ${id}::uuid AND b."passengerId" = ${passengerId}::uuid FOR UPDATE OF r`

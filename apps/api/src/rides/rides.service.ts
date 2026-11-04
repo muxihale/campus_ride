@@ -1,5 +1,7 @@
+import { lockActiveUser } from "../auth/active-user.js"
 import {
   BadRequestException,
+  HttpException,
   ConflictException,
   Inject,
   Injectable,
@@ -57,6 +59,7 @@ export class RidesService {
   async create(userId: string, input: CreateRideDto): Promise<RideDto> {
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await lockActiveUser(tx, userId)
         const data = await this.validate(tx, userId, input)
         return serialize(
           await tx.ride.create({
@@ -165,6 +168,7 @@ export class RidesService {
   ): Promise<RideDto> {
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await lockActiveUser(tx, userId)
         const ride = await this.editable(tx, userId, id)
         const current = serialize(ride)
         const merged: CreateRideDto = {
@@ -202,6 +206,7 @@ export class RidesService {
   async publish(userId: string, id: string): Promise<RideDto> {
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await lockActiveUser(tx, userId)
         const ride = await this.ownedForUpdate(tx, userId, id)
         // Повтор команды возвращает текущее состояние, не повторяя побочные действия.
         if (ride.status === "PUBLISHED") return serialize(ride)
@@ -276,6 +281,7 @@ export class RidesService {
   async remove(userId: string, id: string): Promise<void> {
     try {
       await this.prisma.$transaction(async (tx) => {
+        await lockActiveUser(tx, userId)
         await this.editable(tx, userId, id)
         await tx.ride.delete({ where: { id } })
       })
@@ -372,12 +378,7 @@ export class RidesService {
   }
 
   private fail(error: unknown, message = "Поездки временно недоступны"): never {
-    if (
-      error instanceof BadRequestException ||
-      error instanceof NotFoundException ||
-      error instanceof ConflictException
-    )
-      throw error
+    if (error instanceof HttpException) throw error
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
       if (error.code === "P2003")
         throw new BadRequestException(

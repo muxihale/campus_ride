@@ -193,3 +193,25 @@ it("уведомление об отзыве открывает раздел о�
     screen.getByRole("heading", { name: "Вы получили новый отзыв" })
   ).toBeTruthy()
 })
+
+it.each(["#/profile", "#/admin", "#/rides"])(
+  "уведомление о блокировке или отмене открывает %s",
+  async (link) => {
+    await start(
+      page([
+        {
+          ...item,
+          kind: "SYSTEM",
+          title: "Изменение блокировки",
+          resourceType: "user",
+          link,
+        },
+      ])
+    )
+    expect(
+      screen
+        .getByRole("link", { name: "Открыть связанный раздел" })
+        .getAttribute("href")
+    ).toBe(link)
+  }
+)

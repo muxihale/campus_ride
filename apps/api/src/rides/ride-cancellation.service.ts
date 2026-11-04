@@ -1,3 +1,4 @@
+import { lockActiveUser } from "../auth/active-user.js"
 import {
   ConflictException,
   HttpException,
@@ -7,13 +8,14 @@ import {
   ServiceUnavailableException,
 } from "@nestjs/common"
 import { PrismaService } from "../prisma/prisma.service.js"
-import { cancelReservation } from "../bookings/cancellation.js"
+import { cancelRide } from "./cancellation.js"
 @Injectable()
 export class RideCancellationService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
   async cancel(driverId: string, id: string, reason: string) {
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await lockActiveUser(tx, driverId)
         const locked = await tx.$queryRaw<
           { id: string }[]
         >`SELECT "id" FROM "Ride" WHERE "id" = ${id}::uuid AND "driverId" = ${driverId}::uuid FOR UPDATE`
@@ -34,53 +36,7 @@ export class RideCancellationService {
           throw new ConflictException(
             "Нельзя отменить начатую или завершённую поездку"
           )
-        const bookings = await tx.booking.findMany({
-          where: { rideId: id, status: { in: ["PENDING", "CONFIRMED"] } },
-          orderBy: { id: "asc" },
-          select: { id: true, status: true, passengerId: true },
-        })
-        for (const booking of bookings)
-          await cancelReservation(tx, booking, driverId, reason, driverId, true)
-        await tx.ride.update({
-          where: { id },
-          data: {
-            status: "CANCELLED",
-            cancellationReason: reason,
-            statusEvents: {
-              create: {
-                actorId: driverId,
-                fromStatus: ride.status,
-                toStatus: "CANCELLED",
-                reason,
-              },
-            },
-          },
-        })
-        await tx.activityLog.create({
-          data: {
-            actorId: driverId,
-            action: "ride.cancelled",
-            resourceType: "ride",
-            resourceId: id,
-            details: {
-              fromStatus: ride.status,
-              toStatus: "CANCELLED",
-              reason,
-              cancelledBookings: bookings.length,
-            },
-          },
-        })
-        await tx.notification.create({
-          data: {
-            userId: driverId,
-            kind: "RIDE_CANCELLED",
-            title: "Поездка отменена",
-            body: `Причина: ${reason}. Активные заявки отменены; успешные демонстрационные платежи полностью возвращены.`,
-            link: "#/rides",
-            resourceType: "ride",
-            resourceId: id,
-          },
-        })
+        await cancelRide(tx, ride, driverId, reason)
         return {
           id: ride.id,
           status: "CANCELLED" as const,

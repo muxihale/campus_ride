@@ -1,3 +1,4 @@
+import { lockActiveUser } from "./active-user.js"
 import { createHash, randomBytes } from "node:crypto"
 import {
   ConflictException,
@@ -105,12 +106,15 @@ export class AuthService {
       }
       const token = randomBytes(32).toString("base64url")
       const expiresAt = new Date(Date.now() + SESSION_TTL_MS)
-      await this.prisma.session.create({
-        data: {
-          userId: user.id,
-          tokenHash: hashSessionToken(token),
-          expiresAt,
-        },
+      await this.prisma.$transaction(async (tx) => {
+        await lockActiveUser(tx, user.id)
+        await tx.session.create({
+          data: {
+            userId: user.id,
+            tokenHash: hashSessionToken(token),
+            expiresAt,
+          },
+        })
       })
       return { user: toCurrentUser(user), token, expiresAt }
     } catch (error) {

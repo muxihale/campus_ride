@@ -1,3 +1,4 @@
+import { lockActiveUser } from "../auth/active-user.js"
 import { recordRideLifecycle } from "./lifecycle-events.js"
 import { changePayment } from "../bookings/payment.js"
 import {
@@ -19,6 +20,7 @@ export class RideStartService {
   async start(driverId: string, id: string): Promise<StartedRideDto> {
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await lockActiveUser(tx, driverId)
         const locked = await tx.$queryRaw<
           { id: string }[]
         >`SELECT "id" FROM "Ride" WHERE "id" = ${id}::uuid AND "driverId" = ${driverId}::uuid FOR UPDATE`
