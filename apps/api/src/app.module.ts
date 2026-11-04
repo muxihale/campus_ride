@@ -1,3 +1,4 @@
+import { AdminModule } from "./admin/admin.module.js"
 import { ReviewsModule } from "./reviews/reviews.module.js"
 import { NotificationsModule } from "./notifications/notifications.module.js"
 import { BookingsModule } from "./bookings/bookings.module.js"
@@ -37,6 +38,7 @@ import { AuthModule } from "./auth/auth.module.js"
     BookingsModule,
     NotificationsModule,
     ReviewsModule,
+    AdminModule,
   ],
   controllers: [HealthController],
 })
