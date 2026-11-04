@@ -3674,4 +3674,361 @@ describe("Создание заявки и решения водителя (HTTP
       (await notifications("kind=REVIEW_RECEIVED", 0).expect(200)).body.total
     ).toBe(0)
   })
+  const adminReviews = (query = "", account = 3) =>
+    request(app.getHttpServer())
+      .get(`/api/admin/reviews?${query}`)
+      .set("Cookie", accounts[account]!.cookie)
+  const moderate = (
+    id: string,
+    action = "hide",
+    body: object = { reason: "  Нарушение правил общения  " },
+    account = 3
+  ) =>
+    request(app.getHttpServer())
+      .post(`/api/admin/reviews/${id}/${action}`)
+      .set("Cookie", accounts[account]!.cookie)
+      .set("Origin", origin)
+      .send(body)
+  it("модератор ищет отзывы с участниками и причиной без секретов", async () => {
+    const { id, first } = await reviewPair()
+    const result = await adminReviews(`bookingId=${id}`).expect(200)
+    expect(result.headers["cache-control"]).toBe("no-store")
+    expect(result.body).toMatchObject({ total: 2, page: 1, pageSize: 20 })
+    expect(
+      result.body.items.find((row: { id: string }) => row.id === first)
+    ).toMatchObject({
+      id: first,
+      bookingId: id,
+      authorId: accounts[1]!.id,
+      recipientId: driver,
+      recipientRole: "DRIVER",
+      bookingStatus: "COMPLETED",
+      rideStatus: "COMPLETED",
+      hiddenAt: null,
+      hiddenReason: null,
+      author: { id: accounts[1]!.id, fullName: "Анна Соколова" },
+    })
+    expect(JSON.stringify(result.body)).not.toMatch(
+      /passwordHash|tokenHash|sessions|email|phone/
+    )
+    await moderate(first).expect(200)
+    const filtered = await adminReviews(
+      `bookingId=${id}&hidden=true&recipientRole=DRIVER&ratingMin=4&ratingMax=5&authorId=${accounts[1]!.id}&recipientId=${driver}&q=${encodeURIComponent("нарушение правил")}`
+    ).expect(200)
+    expect(filtered.body.total).toBe(1)
+    expect(filtered.body.items[0]).toMatchObject({
+      id: first,
+      hiddenReason: "Нарушение правил общения",
+    })
+    expect(
+      (await adminReviews(`bookingId=${id}&hidden=false`).expect(200)).body
+        .total
+    ).toBe(1)
+    expect(
+      (await adminReviews(`bookingId=${id}&q=%25`).expect(200)).body.total
+    ).toBe(0)
+  })
+  it("фильтрует даты включительно и стабильно сортирует страницы", async () => {
+    const { id, first, second } = await reviewPair()
+    await prisma.review.updateMany({
+      where: { id: { in: [first, second] } },
+      data: { createdAt: new Date("2026-11-01T12:00:00Z") },
+    })
+    const query = `bookingId=${id}&dateFrom=2026-11-01T12:00:00Z&dateTo=2026-11-01T12:00:00Z`
+    expect((await adminReviews(query).expect(200)).body.total).toBe(2)
+    const ids = [first, second].sort()
+    for (const [index, id] of ids.entries())
+      expect(
+        (
+          await adminReviews(
+            `${query}&sort=oldest&pageSize=1&page=${index + 1}`
+          ).expect(200)
+        ).body.items[0].id
+      ).toBe(id)
+    expect(
+      (
+        await adminReviews(
+          `bookingId=${id}&dateTo=2020-01-01T00:00:00Z`
+        ).expect(200)
+      ).body.total
+    ).toBe(0)
+    expect(
+      (await adminReviews(`bookingId=${id}&page=99&pageSize=1`).expect(200))
+        .body
+    ).toMatchObject({ items: [], total: 2, page: 99 })
+  })
+  it("скрытие и восстановление меняют оба рейтинга и публичную карточку без удаления отзыва", async () => {
+    const { first, second, id } = await reviewPair()
+    const upcoming = await prisma.ride.create({
+      data: {
+        driverId: driver,
+        vehicleId: vehicle,
+        originId: start,
+        destinationId: finish,
+        departureAt: new Date("2099-11-09"),
+        seatsTotal: 3,
+        priceKopecks: 15015,
+        status: "PUBLISHED",
+      },
+    })
+    rides.push(upcoming.id)
+    const hide = await moderate(first).expect(200)
+    expect(hide.body).toMatchObject({
+      id: first,
+      changed: true,
+      hiddenAt: expect.any(String),
+      hiddenReason: "Нарушение правил общения",
+    })
+    expect((await ratings().expect(200)).body.driver).toEqual({
+      average: null,
+      count: 0,
+    })
+    expect((await publicReviews().expect(200)).body.total).toBe(0)
+    expect(
+      (await ownReviews(`direction=sent&bookingId=${id}`).expect(200)).body
+        .total
+    ).toBe(0)
+    const card = await request(app.getHttpServer())
+      .get(`/api/rides/${upcoming.id}`)
+      .expect(200)
+    expect(card.body.driver).toMatchObject({ rating: null, reviewCount: 0 })
+    await review(id).expect(409)
+    const restored = await moderate(first, "restore", {
+      reason: "Контекст проверен, нарушения нет",
+    }).expect(200)
+    expect(restored.body).toEqual({
+      id: first,
+      changed: true,
+      hiddenAt: null,
+      hiddenReason: null,
+    })
+    expect((await ratings().expect(200)).body.driver).toEqual({
+      average: 5,
+      count: 1,
+    })
+    expect(
+      (
+        await request(app.getHttpServer())
+          .get(`/api/rides/${upcoming.id}`)
+          .expect(200)
+      ).body.driver
+    ).toMatchObject({ rating: 5, reviewCount: 1 })
+    await moderate(second).expect(200)
+    expect((await ratings(accounts[1]!.id).expect(200)).body.passenger).toEqual(
+      { average: null, count: 0 }
+    )
+    await moderate(second, "restore", {
+      reason: "Исправлена ошибка модерации",
+    }).expect(200)
+    expect((await ratings(accounts[1]!.id).expect(200)).body.passenger).toEqual(
+      { average: 3, count: 1 }
+    )
+    expect(await prisma.review.count({ where: { bookingId: id } })).toBe(2)
+    expect(
+      await prisma.activityLog.findFirst({
+        where: { resourceId: first, action: "review.restored" },
+      })
+    ).toMatchObject({
+      actorId: accounts[3]!.id,
+      details: expect.objectContaining({
+        reason: "Контекст проверен, нарушения нет",
+        fromHiddenAt: hide.body.hiddenAt,
+        toHiddenAt: null,
+      }),
+    })
+    expect(
+      await prisma.notification.count({
+        where: { resourceId: first, kind: "SYSTEM" },
+      })
+    ).toBe(6)
+    for (const userId of [accounts[1]!.id, driver])
+      expect(
+        await prisma.notification.count({
+          where: { resourceId: first, userId, kind: "SYSTEM" },
+        })
+      ).toBe(2)
+  })
+  it("параллельное скрытие и повторные команды не дублируют уведомления и сохраняют первую причину", async () => {
+    const { first } = await reviewPair()
+    const results = await Promise.all([moderate(first), moderate(first)])
+    expect(results.map((r) => r.status)).toEqual([200, 200])
+    expect(results.filter((r) => r.body.changed)).toHaveLength(1)
+    const hiddenAt = results[0].body.hiddenAt
+    const repeat = await moderate(first, "hide", {
+      reason: "Другая причина",
+    }).expect(200)
+    expect(repeat.body).toMatchObject({
+      hiddenAt,
+      hiddenReason: "Нарушение правил общения",
+      changed: false,
+    })
+    expect(
+      await prisma.activityLog.count({
+        where: { action: "review.hidden", resourceId: first },
+      })
+    ).toBe(1)
+    expect(
+      await prisma.notification.count({
+        where: { kind: "SYSTEM", resourceId: first },
+      })
+    ).toBe(3)
+    await moderate(first, "restore", { reason: "Проверено" }).expect(200)
+    expect(
+      (await moderate(first, "restore", { reason: "Повтор" }).expect(200)).body
+        .changed
+    ).toBe(false)
+    expect(
+      await prisma.activityLog.count({
+        where: { action: "review.restored", resourceId: first },
+      })
+    ).toBe(1)
+  })
+  it("видит в модерации отзыв некорректного исторического участия без включения в рейтинг", async () => {
+    const { id, first } = await reviewPair()
+    await prisma.booking.update({
+      where: { id },
+      data: { status: "CANCELLED" },
+    })
+    expect((await adminReviews(`bookingId=${id}`).expect(200)).body.total).toBe(
+      2
+    )
+    await moderate(first).expect(200)
+    await moderate(first, "restore", { reason: "Проверка" }).expect(200)
+    expect((await ratings().expect(200)).body.driver.count).toBe(0)
+  })
+  it("проверяет ADMIN, сессию, Origin и отсутствие отзыва", async () => {
+    const { first } = await reviewPair()
+    await request(app.getHttpServer()).get("/api/admin/reviews").expect(401)
+    for (const account of [0, 1, 2]) {
+      await adminReviews("", account).expect(403)
+      await moderate(first, "hide", { reason: "Проверка" }, account).expect(403)
+    }
+    await request(app.getHttpServer())
+      .post(`/api/admin/reviews/${first}/hide`)
+      .set("Cookie", accounts[3]!.cookie)
+      .send({ reason: "Проверка" })
+      .expect(403)
+    await request(app.getHttpServer())
+      .post(`/api/admin/reviews/${first}/hide`)
+      .set("Cookie", accounts[3]!.cookie)
+      .set("Origin", "https://example.org")
+      .send({ reason: "Проверка" })
+      .expect(403)
+    await moderate(randomUUID()).expect(404)
+    await moderate("bad").expect(400)
+    await prisma.user.update({
+      where: { id: accounts[3]!.id },
+      data: { status: "BLOCKED" },
+    })
+    try {
+      await adminReviews().expect(401)
+      await moderate(first).expect(401)
+    } finally {
+      await prisma.user.update({
+        where: { id: accounts[3]!.id },
+        data: { status: "ACTIVE" },
+      })
+    }
+  })
+  it.each([
+    {},
+    { reason: " " },
+    { reason: "а".repeat(501) },
+    { reason: null },
+    { reason: "Причина", hiddenAt: null },
+  ])("проверяет обязательную причину обеих команд %j", async (body) => {
+    const { first } = await reviewPair()
+    await moderate(first, "hide", body).expect(400)
+    await moderate(first, "restore", body).expect(400)
+  })
+  it.each([
+    "hidden=maybe",
+    "recipientRole=ADMIN",
+    "ratingMin=0",
+    "ratingMin=5&ratingMax=1",
+    "dateFrom=bad",
+    "dateFrom=2027-01-01T00:00:00Z&dateTo=2020-01-01T00:00:00Z",
+    "authorId=bad",
+    "bookingId=bad",
+    "page=0",
+    "pageSize=101",
+    "direction=sent",
+  ])("проверяет параметры модерации %s", async (query) => {
+    await adminReviews(query).expect(400)
+  })
+  it("ошибка уведомления откатывает скрытие, аудит и изменение рейтинга", async () => {
+    const { first } = await reviewPair()
+    const spy = failNotificationWrite(2)
+    try {
+      await moderate(first).expect(503)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(
+      (await prisma.review.findUniqueOrThrow({ where: { id: first } })).hiddenAt
+    ).toBeNull()
+    expect((await ratings().expect(200)).body.driver.average).toBe(5)
+    expect(
+      await prisma.activityLog.count({
+        where: { action: "review.hidden", resourceId: first },
+      })
+    ).toBe(0)
+    expect(
+      await prisma.notification.count({
+        where: { kind: "SYSTEM", resourceId: first },
+      })
+    ).toBe(0)
+  })
+  it("ошибка журнала откатывает восстановление без уведомлений", async () => {
+    const { first } = await reviewPair()
+    const hidden = await moderate(first).expect(200)
+    const original = prisma.$transaction.bind(prisma)
+    const spy = vi.spyOn(prisma, "$transaction").mockImplementationOnce(((
+      callback: (tx: Prisma.TransactionClient) => Promise<unknown>
+    ) =>
+      original(async (tx) =>
+        callback(
+          new Proxy(tx, {
+            get(target, property, receiver) {
+              if (property === "activityLog")
+                return {
+                  ...target.activityLog,
+                  create: () => {
+                    throw new Error("secret audit failure")
+                  },
+                }
+              return Reflect.get(target, property, receiver)
+            },
+          })
+        )
+      )) as typeof prisma.$transaction)
+    try {
+      await moderate(first, "restore", { reason: "Проверка" }).expect(503)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(
+      (
+        await prisma.review.findUniqueOrThrow({ where: { id: first } })
+      ).hiddenAt?.toISOString()
+    ).toBe(hidden.body.hiddenAt)
+    expect((await ratings().expect(200)).body.driver.count).toBe(0)
+    expect(
+      await prisma.notification.count({
+        where: { kind: "SYSTEM", resourceId: first },
+      })
+    ).toBe(3)
+  })
+  it("возвращает безопасный 503 при сбое чтения списка модерации", async () => {
+    const spy = vi
+      .spyOn(prisma, "$transaction")
+      .mockRejectedValueOnce(new Error("secret database error"))
+    try {
+      expect((await adminReviews().expect(503)).body.message).toBe(
+        "Модерация отзывов временно недоступна"
+      )
+    } finally {
+      spy.mockRestore()
+    }
+  })
 })

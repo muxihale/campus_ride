@@ -1,3 +1,5 @@
+import { AdminReviewsController } from "./admin-reviews.controller.js"
+import { AdminReviewsService } from "./admin-reviews.service.js"
 import { UserStatusController } from "./user-status.controller.js"
 import { UserStatusService } from "./user-status.service.js"
 import { TrustedOriginGuard } from "../auth/trusted-origin.guard.js"
@@ -8,7 +10,16 @@ import { AdminUsersController } from "./admin-users.controller.js"
 import { AdminUsersService } from "./admin-users.service.js"
 @Module({
   imports: [AuthModule, PrismaModule],
-  controllers: [AdminUsersController, UserStatusController],
-  providers: [AdminUsersService, UserStatusService, TrustedOriginGuard],
+  controllers: [
+    AdminUsersController,
+    UserStatusController,
+    AdminReviewsController,
+  ],
+  providers: [
+    AdminUsersService,
+    UserStatusService,
+    AdminReviewsService,
+    TrustedOriginGuard,
+  ],
 })
 export class AdminModule {}
