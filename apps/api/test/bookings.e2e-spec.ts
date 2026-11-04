@@ -4031,4 +4031,77 @@ describe("Создание заявки и решения водителя (HTTP
       spy.mockRestore()
     }
   })
+  const adminActivity = (query = "", account = 3) =>
+    request(app.getHttpServer())
+      .get(`/api/admin/activity?${query}`)
+      .set("Cookie", accounts[account]!.cookie)
+  it("история администратора содержит только его решения с причиной и безопасными полями", async () => {
+    const { first } = await reviewPair()
+    await moderate(first).expect(200)
+    await moderate(first, "restore", { reason: "Контекст проверен" }).expect(
+      200
+    )
+    await prisma.activityLog.create({
+      data: {
+        actorId: accounts[0]!.id,
+        action: "review.hidden",
+        resourceType: "review",
+        resourceId: first,
+        details: { reason: "Чужое решение", token: "private-token" },
+      },
+    })
+    const result = await adminActivity().expect(200)
+    expect(result.headers["cache-control"]).toBe("no-store")
+    expect(result.body.total).toBe(2)
+    expect(result.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "review.restored",
+          resourceType: "review",
+          resourceId: first,
+          reason: "Контекст проверен",
+        }),
+      ])
+    )
+    expect(JSON.stringify(result.body)).not.toMatch(
+      /Чужое решение|private-token|details|email|password|token/
+    )
+    const filtered = await adminActivity(
+      `q=${encodeURIComponent("Контекст")}&action=review.restored&resourceType=review&resourceId=${first}&dateFrom=2020-01-01T00:00:00Z&dateTo=2099-01-01T00:00:00Z`
+    ).expect(200)
+    expect(filtered.body.total).toBe(1)
+    expect(
+      (
+        await adminActivity(`resourceId=${first}&page=99&pageSize=1`).expect(
+          200
+        )
+      ).body
+    ).toMatchObject({ items: [], total: 2, page: 99 })
+    const oldest = await adminActivity("sort=oldest&pageSize=1").expect(200)
+    expect(oldest.body.items[0].action).toBe("review.hidden")
+    await request(app.getHttpServer()).get("/api/admin/activity").expect(401)
+    await adminActivity("", 0).expect(403)
+  })
+  it.each([
+    "actorId=" + randomUUID(),
+    "resourceId=bad",
+    "resourceType=session",
+    "action=auth.login",
+    "dateFrom=2027-01-01T00:00:00Z&dateTo=2020-01-01T00:00:00Z",
+    "page=0",
+  ])("история не принимает неверные и чужие фильтры %s", async (query) => {
+    await adminActivity(query).expect(400)
+  })
+  it("история возвращает безопасную ошибку при сбое чтения", async () => {
+    const spy = vi
+      .spyOn(prisma, "$transaction")
+      .mockRejectedValueOnce(new Error("private database"))
+    try {
+      expect((await adminActivity().expect(503)).body.message).toBe(
+        "История действий временно недоступна"
+      )
+    } finally {
+      spy.mockRestore()
+    }
+  })
 })

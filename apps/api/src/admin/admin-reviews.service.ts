@@ -148,7 +148,7 @@ export class AdminReviewsService {
               body: `Причина: ${reason}. Рейтинг рассчитывается по видимым отзывам завершённых поездок.`,
               resourceType: "review",
               resourceId: review.id,
-              link: "#/reviews",
+              link: userId === actorId ? "#/admin/reviews" : "#/reviews",
             },
           })
         }

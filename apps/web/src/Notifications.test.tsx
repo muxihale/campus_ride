@@ -215,3 +215,22 @@ it.each(["#/profile", "#/admin", "#/rides"])(
     ).toBe(link)
   }
 )
+
+it("уведомление о модерации открывает экран администратора", async () => {
+  await start(
+    page([
+      {
+        ...item,
+        kind: "SYSTEM",
+        title: "Отзыв скрыт администратором",
+        resourceType: "review",
+        link: "#/admin/reviews",
+      },
+    ])
+  )
+  expect(
+    screen
+      .getByRole("link", { name: "Открыть связанный раздел" })
+      .getAttribute("href")
+  ).toBe("#/admin/reviews")
+})

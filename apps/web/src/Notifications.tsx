@@ -301,6 +301,7 @@ export function NotificationsScreen({ onExpired }: { onExpired: () => void }) {
                             "#/ride-bookings",
                             "#/driver",
                             "#/reviews",
+                            "#/admin/reviews",
                             "#/profile",
                             "#/admin",
                             "#/rides",

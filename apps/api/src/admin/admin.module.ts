@@ -1,3 +1,7 @@
+import {
+  AdminActivityController,
+  AdminActivityService,
+} from "./admin-activity.js"
 import { AdminReviewsController } from "./admin-reviews.controller.js"
 import { AdminReviewsService } from "./admin-reviews.service.js"
 import { UserStatusController } from "./user-status.controller.js"
@@ -14,11 +18,13 @@ import { AdminUsersService } from "./admin-users.service.js"
     AdminUsersController,
     UserStatusController,
     AdminReviewsController,
+    AdminActivityController,
   ],
   providers: [
     AdminUsersService,
     UserStatusService,
     AdminReviewsService,
+    AdminActivityService,
     TrustedOriginGuard,
   ],
 })

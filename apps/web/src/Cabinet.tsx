@@ -1,3 +1,5 @@
+import { AdminActivityScreen } from "./AdminActivity"
+import { AdminReviewsScreen } from "./AdminReviews"
 import { AdminUsersScreen } from "./AdminUsers"
 import { ReviewsScreen } from "./Reviews"
 import { NotificationsScreen } from "./Notifications"
@@ -64,7 +66,11 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
         {[
           ...available,
           ...(user.roles.includes("ADMIN")
-            ? [{ path: "admin/users", label: "Пользователи" }]
+            ? [
+                { path: "admin/users", label: "Пользователи" },
+                { path: "admin/reviews", label: "Модерация отзывов" },
+                { path: "admin/activity", label: "Мои действия" },
+              ]
             : []),
           ...(user.roles.includes("PASSENGER")
             ? [{ path: "bookings", label: "Мои заявки" }]
@@ -97,8 +103,12 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
           </a>
         ))}
       </nav>
-      {(current === "admin" || current === "admin/users") &&
-      user.roles.includes("ADMIN") ? (
+      {current === "admin/reviews" && user.roles.includes("ADMIN") ? (
+        <AdminReviewsScreen onExpired={onExpired} />
+      ) : current === "admin/activity" && user.roles.includes("ADMIN") ? (
+        <AdminActivityScreen onExpired={onExpired} />
+      ) : (current === "admin" || current === "admin/users") &&
+        user.roles.includes("ADMIN") ? (
         <AdminUsersScreen userId={user.id} onExpired={onExpired} />
       ) : current === "reviews" ? (
         <ReviewsScreen userId={user.id} onExpired={onExpired} />
