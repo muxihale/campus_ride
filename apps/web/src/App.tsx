@@ -117,6 +117,16 @@ export function App() {
 
   return (
     <div className="mx-auto flex min-h-svh max-w-6xl flex-col px-5 sm:px-10">
+      <a
+        href="#main-content"
+        onClick={(event) => {
+          event.preventDefault()
+          document.getElementById("main-content")?.focus()
+        }}
+        className="sr-only rounded-lg bg-primary px-4 py-3 text-primary-foreground focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50"
+      >
+        Перейти к содержимому
+      </a>
       <header className="flex flex-wrap items-center justify-between gap-4 border-b py-5">
         <a
           href="/"
@@ -176,7 +186,7 @@ export function App() {
         </p>
       )}
       {publicDetail ? (
-        <main className="flex-1 py-8 sm:py-12">
+        <main id="main-content" tabIndex={-1} className="flex-1 py-8 sm:py-12">
           <PublicRideScreen
             key={hash}
             user={user}
@@ -187,11 +197,11 @@ export function App() {
           />
         </main>
       ) : searching ? (
-        <main className="flex-1 py-8 sm:py-12">
+        <main id="main-content" tabIndex={-1} className="flex-1 py-8 sm:py-12">
           <SearchScreen key={hash} query={hash.split("?").slice(1).join("?")} />
         </main>
       ) : user ? (
-        <main className="flex-1">
+        <main id="main-content" tabIndex={-1} className="flex-1">
           <Cabinet
             user={user}
             onSaved={profileSaved}
@@ -199,7 +209,11 @@ export function App() {
           />
         </main>
       ) : (
-        <main className="grid flex-1 items-center gap-10 py-12 lg:grid-cols-2 lg:gap-20 lg:py-24">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="grid flex-1 items-center gap-10 py-12 lg:grid-cols-2 lg:gap-20 lg:py-24"
+        >
           <section>
             <p className="mb-5 text-sm text-muted-foreground">
               Свои люди. Общий маршрут.

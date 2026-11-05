@@ -132,3 +132,21 @@
     cursor: pointer;
   }
 }
+
+/* Длинные имена, адреса и сообщения не расширяют мобильный экран. */
+@layer base {
+  main {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  input,
+  select,
+  textarea {
+    min-width: 0;
+    max-width: 100%;
+  }
+  a:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 3px;
+  }
+}

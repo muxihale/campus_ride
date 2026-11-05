@@ -30,6 +30,19 @@ function guest() {
   fetchMock.mockResolvedValueOnce(response({ message: "Требуется вход" }, 401))
   stubFetch()
 }
+it("пропускает меню с клавиатуры, не меняя маршрут", async () => {
+  guest()
+  render(<App />)
+  await screen.findByRole("heading", { name: "С возвращением" })
+  const hash = window.location.hash
+  await userEvent.tab()
+  const skip = screen.getByRole("link", { name: "Перейти к содержимому" })
+  expect(document.activeElement).toBe(skip)
+  await userEvent.keyboard("{Enter}")
+  expect(document.activeElement).toBe(screen.getByRole("main"))
+  expect(window.location.hash).toBe(hash)
+})
+
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
