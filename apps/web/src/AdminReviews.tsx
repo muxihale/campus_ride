@@ -3,7 +3,7 @@ import { rideStatusNames } from "./ride-data"
 import { useEffect, useRef, useState, type FormEvent } from "react"
 import { Button } from "@workspace/ui/components/button"
 import { ApiError, apiRequest } from "./auth"
-import { useAdminPage } from "./useAdminPage"
+import { useApiPage } from "./useApiPage"
 import { ekaterinburgInput, ekaterinburgISO } from "./ride-form"
 export type AdminReview = {
   id: string
@@ -51,7 +51,7 @@ export function AdminReviewsScreen({ onExpired }: { onExpired: () => void }) {
       active.current = false
     }
   }, [])
-  const list = useAdminPage<AdminReview>(
+  const list = useApiPage<AdminReview>(
     "admin/reviews",
     query,
     page,

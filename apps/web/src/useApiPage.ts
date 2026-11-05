@@ -1,7 +1,7 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react"
 import { ApiError, apiRequest } from "./auth"
 import type { Page } from "./ride-data"
-export function useAdminPage<T>(
+export function useApiPage<T>(
   path: string,
   query: string,
   page: number,

@@ -1,3 +1,4 @@
+import { ActivityScreen } from "./Activity"
 import { AdminActivityScreen } from "./AdminActivity"
 import { AdminReviewsScreen } from "./AdminReviews"
 import { AdminUsersScreen } from "./AdminUsers"
@@ -83,6 +84,7 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
                 { path: "rides/new", label: "Создать поездку" },
               ]
             : []),
+          { path: "activity", label: "История действий" },
           { path: "reviews", label: "Отзывы и рейтинги" },
           { path: "notifications", label: "Уведомления" },
           { path: "profile", label: "Мой профиль" },
@@ -103,7 +105,9 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
           </a>
         ))}
       </nav>
-      {current === "admin/reviews" && user.roles.includes("ADMIN") ? (
+      {current === "activity" ? (
+        <ActivityScreen roles={user.roles} onExpired={onExpired} />
+      ) : current === "admin/reviews" && user.roles.includes("ADMIN") ? (
         <AdminReviewsScreen onExpired={onExpired} />
       ) : current === "admin/activity" && user.roles.includes("ADMIN") ? (
         <AdminActivityScreen onExpired={onExpired} />
