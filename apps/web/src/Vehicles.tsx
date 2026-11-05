@@ -23,6 +23,7 @@ type Filters = {
   model: string
   color: string
   minSeats: string
+  maxSeats: string
 }
 const emptyFilters: Filters = {
   q: "",
@@ -30,6 +31,7 @@ const emptyFilters: Filters = {
   model: "",
   color: "",
   minSeats: "",
+  maxSeats: "",
 }
 const inputClass =
   "mt-2 h-11 w-full rounded-lg border border-input bg-background px-3 text-base outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50"
@@ -173,6 +175,7 @@ export function VehiclesScreen({ onExpired }: { onExpired: () => void }) {
   const [revision, setRevision] = useState(0)
   const [editor, setEditor] = useState<Vehicle | "new" | null>(null)
   const [notice, setNotice] = useState("")
+  const [filterError, setFilterError] = useState("")
   const params = new URLSearchParams({ page: String(page), pageSize: "10" })
   for (const [key, value] of Object.entries(filters))
     if (value.trim()) params.set(key, value.trim())
@@ -192,7 +195,10 @@ export function VehiclesScreen({ onExpired }: { onExpired: () => void }) {
     let active = true
     apiRequest<VehicleList>(`me/vehicles?${search}`)
       .then((data) => {
-        if (active) setResult({ key, data })
+        if (!active) return
+        const last = Math.max(1, Math.ceil(data.total / data.pageSize))
+        if (page > last) setPage(last)
+        else setResult({ key, data })
       })
       .catch((cause: unknown) => {
         if (!active) return
@@ -209,18 +215,45 @@ export function VehiclesScreen({ onExpired }: { onExpired: () => void }) {
     return () => {
       active = false
     }
-  }, [search, key, onExpired])
+  }, [search, key, page, onExpired])
 
   function reset() {
     setDraft(emptyFilters)
     setFilters(emptyFilters)
     setPage(1)
+    setFilterError("")
+    setRevision((value) => value + 1)
   }
   function apply(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    setFilterError("")
+    for (const name of ["minSeats", "maxSeats"] as const) {
+      if (draft[name] && !/^[1-8]$/.test(draft[name])) {
+        setFilterError("Количество мест — целое число от 1 до 8")
+        return
+      }
+    }
+    if (
+      draft.minSeats &&
+      draft.maxSeats &&
+      Number(draft.minSeats) > Number(draft.maxSeats)
+    ) {
+      setFilterError("Минимум мест не может превышать максимум")
+      return
+    }
+    if (
+      draft.q.trim().length > 100 ||
+      draft.make.trim().length > 60 ||
+      draft.model.trim().length > 60 ||
+      draft.color.trim().length > 40
+    ) {
+      setFilterError("Проверьте длину поискового текста и фильтров")
+      return
+    }
     setFilters({ ...draft })
     setPage(1)
     setNotice("")
+    setRevision((value) => value + 1)
   }
 
   return (
@@ -266,6 +299,7 @@ export function VehiclesScreen({ onExpired }: { onExpired: () => void }) {
         onSubmit={apply}
         className="space-y-4 rounded-xl border p-4"
         aria-label="Поиск автомобилей"
+        noValidate
       >
         <label className="block text-sm font-medium">
           Поиск
@@ -293,25 +327,41 @@ export function VehiclesScreen({ onExpired }: { onExpired: () => void }) {
               />
             </label>
           ))}
-          <label className="block text-sm font-medium">
-            Минимум мест
-            <input
-              type="number"
-              min={1}
-              max={8}
-              step={1}
-              value={draft.minSeats}
-              onChange={(event) =>
-                setDraft({ ...draft, minSeats: event.target.value })
-              }
-              className={inputClass}
-            />
-          </label>
+          {(["minSeats", "maxSeats"] as const).map((name) => (
+            <label key={name} className="block text-sm font-medium">
+              {name === "minSeats" ? "Минимум мест" : "Максимум мест"}
+              <input
+                type="number"
+                min={1}
+                max={8}
+                step={1}
+                value={draft[name]}
+                onChange={(event) => {
+                  setDraft({ ...draft, [name]: event.target.value })
+                  setFilterError("")
+                }}
+                className={inputClass}
+              />
+            </label>
+          ))}
         </div>
+        {filterError && (
+          <p role="alert" className="text-sm text-destructive">
+            {filterError}
+          </p>
+        )}
         <div className="flex flex-wrap gap-3">
           <Button type="submit">Найти</Button>
           <Button type="button" variant="outline" onClick={reset}>
             Сбросить фильтры
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={loading}
+            onClick={() => setRevision((value) => value + 1)}
+          >
+            Обновить список
           </Button>
         </div>
       </form>
@@ -348,16 +398,12 @@ export function VehiclesScreen({ onExpired }: { onExpired: () => void }) {
                 <h2 className="text-lg font-semibold">
                   {hasFilters
                     ? "Нет автомобилей по этим условиям"
-                    : page > 1
-                      ? "На этой странице нет автомобилей"
-                      : "Пока нет автомобилей"}
+                    : "Пока нет автомобилей"}
                 </h2>
                 <p className="mt-2 text-sm text-muted-foreground">
                   {hasFilters
                     ? "Измените поиск или сбросьте фильтры."
-                    : page > 1
-                      ? "Вернитесь на предыдущую страницу."
-                      : "Добавьте свой первый автомобиль, чтобы подготовиться к созданию поездок."}
+                    : "Добавьте свой первый автомобиль, чтобы подготовиться к созданию поездок."}
                 </p>
               </div>
             ) : (
@@ -406,11 +452,12 @@ export function VehiclesScreen({ onExpired }: { onExpired: () => void }) {
                 Назад
               </Button>
               <span className="text-sm text-muted-foreground">
-                Страница {page} из {Math.max(1, Math.ceil(data.total / 10))}
+                Страница {page} из{" "}
+                {Math.max(1, Math.ceil(data.total / data.pageSize))}
               </span>
               <Button
                 variant="outline"
-                disabled={page * 10 >= data.total}
+                disabled={page * data.pageSize >= data.total}
                 onClick={() => setPage((value) => value + 1)}
               >
                 Далее

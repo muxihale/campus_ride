@@ -127,6 +127,81 @@ describe("Создание заявки и решения водителя (HTTP
     ).id
     rides.push(rideId)
   })
+  it("применяет буквальный поиск маршрута в публичных поездках и кабинетах обеих ролей", async () => {
+    await pending()
+    const paths = [
+      "/api/rides",
+      "/api/me/rides",
+      "/api/me/bookings",
+      "/api/me/ride-bookings",
+    ]
+    const marker = `Уралмаш%_${String.fromCharCode(92)}точка`
+    await prisma.location.update({
+      where: { id: start },
+      data: { name: marker },
+    })
+    try {
+      for (const [index, path] of paths.entries()) {
+        for (const q of [
+          "%",
+          "_",
+          String.fromCharCode(92),
+          marker,
+          "Несуществующий%_",
+        ]) {
+          const result = await request(app.getHttpServer())
+            .get(path)
+            .set("Cookie", accounts[index === 2 ? 1 : 0]!.cookie)
+            .query({
+              q,
+              ...(index === 0 ? { originDistrictId: district } : {}),
+            })
+            .expect(200)
+          expect(result.body.total > 0).toBe(q !== "Несуществующий%_")
+        }
+      }
+      await prisma.location.update({
+        where: { id: start },
+        data: { name: "Уралмаш" },
+      })
+      for (const [index, path] of paths.entries()) {
+        const result = await request(app.getHttpServer())
+          .get(path)
+          .set("Cookie", accounts[index === 2 ? 1 : 0]!.cookie)
+          .query({
+            q: "%",
+            ...(index === 0 ? { originDistrictId: district } : {}),
+          })
+          .expect(200)
+        expect(result.body.total).toBe(0)
+      }
+    } finally {
+      await prisma.location.update({
+        where: { id: start },
+        data: { name: "Уралмаш" },
+      })
+    }
+  })
+
+  it("не расширяет поиск уведомлений символами шаблона SQL", async () => {
+    await pending()
+    const special = await prisma.notification.create({
+      data: {
+        userId: accounts[1]!.id,
+        kind: "SYSTEM",
+        title: "Изменение%_маршрута",
+        body: `Остановка ${String.fromCharCode(92)} у корпуса`,
+      },
+    })
+    for (const q of ["%", "_", String.fromCharCode(92)]) {
+      const result = await notifications(`q=${encodeURIComponent(q)}`).expect(
+        200
+      )
+      expect(result.body.total).toBe(1)
+      expect(result.body.items[0].id).toBe(special.id)
+    }
+  })
+
   afterAll(async () => {
     vi.restoreAllMocks()
     try {

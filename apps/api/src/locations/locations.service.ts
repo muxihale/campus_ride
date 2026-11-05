@@ -1,3 +1,4 @@
+import { textContains } from "../common/search.js"
 import { Inject, Injectable, ServiceUnavailableException } from "@nestjs/common"
 import type { Prisma } from "../generated/prisma/client.js"
 import { PrismaService } from "../prisma/prisma.service.js"
@@ -10,10 +11,6 @@ import type {
 } from "./location.dto.js"
 
 const referenceSelect = { id: true, name: true }
-const contains = (value: string) => ({
-  contains: value,
-  mode: "insensitive" as const,
-})
 
 @Injectable()
 export class LocationsService {
@@ -24,9 +21,14 @@ export class LocationsService {
       districtId: query.districtId,
       campusId: query.campusId,
       kind: query.kind,
-      ...(query.address ? { address: contains(query.address) } : {}),
+      ...(query.address ? { address: textContains(query.address) } : {}),
       ...(query.q
-        ? { OR: [{ name: contains(query.q) }, { address: contains(query.q) }] }
+        ? {
+            OR: [
+              { name: textContains(query.q) },
+              { address: textContains(query.q) },
+            ],
+          }
         : {}),
     }
     try {
@@ -55,7 +57,7 @@ export class LocationsService {
   async districts(query: DistrictQueryDto): Promise<ReferenceListDto> {
     const points = this.referenceLocations(query)
     const where: Prisma.DistrictWhereInput = {
-      ...(query.q ? { name: contains(query.q) } : {}),
+      ...(query.q ? { name: textContains(query.q) } : {}),
       ...(Object.keys(points).length || query.campusId
         ? { locations: { some: { ...points, campusId: query.campusId } } }
         : {}),
@@ -83,7 +85,7 @@ export class LocationsService {
   async campuses(query: CampusQueryDto): Promise<ReferenceListDto> {
     const points = this.referenceLocations(query)
     const where: Prisma.CampusWhereInput = {
-      ...(query.q ? { name: contains(query.q) } : {}),
+      ...(query.q ? { name: textContains(query.q) } : {}),
       ...(Object.keys(points).length || query.districtId
         ? { locations: { some: { ...points, districtId: query.districtId } } }
         : {}),
@@ -113,8 +115,8 @@ export class LocationsService {
   ): Prisma.LocationWhereInput {
     return {
       ...(query.kind ? { kind: query.kind } : {}),
-      ...(query.address ? { address: contains(query.address) } : {}),
-      ...(query.locationName ? { name: contains(query.locationName) } : {}),
+      ...(query.address ? { address: textContains(query.address) } : {}),
+      ...(query.locationName ? { name: textContains(query.locationName) } : {}),
     }
   }
 }

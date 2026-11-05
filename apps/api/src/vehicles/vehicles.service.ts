@@ -1,3 +1,4 @@
+import { textContains } from "../common/search.js"
 import {
   BadRequestException,
   ConflictException,
@@ -42,27 +43,19 @@ export class VehiclesService {
       throw new BadRequestException("Минимум мест не может превышать максимум")
     const where: Prisma.VehicleWhereInput = {
       driverId: userId,
-      ...(query.make
-        ? { make: { contains: query.make, mode: "insensitive" } }
-        : {}),
-      ...(query.model
-        ? { model: { contains: query.model, mode: "insensitive" } }
-        : {}),
-      ...(query.color
-        ? { color: { contains: query.color, mode: "insensitive" } }
-        : {}),
+      ...(query.make ? { make: textContains(query.make) } : {}),
+      ...(query.model ? { model: textContains(query.model) } : {}),
+      ...(query.color ? { color: textContains(query.color) } : {}),
       passengerSeats: { gte: query.minSeats, lte: query.maxSeats },
       ...(query.q
         ? {
             OR: ["make", "model", "color", "registrationNumber"].map(
               (field) => ({
-                [field]: {
-                  contains:
-                    field === "registrationNumber"
-                      ? normalizeRegistrationNumber(query.q!)
-                      : query.q,
-                  mode: "insensitive",
-                },
+                [field]: textContains(
+                  field === "registrationNumber"
+                    ? normalizeRegistrationNumber(query.q!)
+                    : query.q!
+                ),
               })
             ),
           }

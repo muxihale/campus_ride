@@ -1,3 +1,4 @@
+import { textContains } from "../common/search.js"
 import { paymentSelect, serializePayment } from "./payment.js"
 import {
   BadRequestException,
@@ -27,9 +28,7 @@ export class DriverBookingsService {
       status: { in: ["PENDING", "CONFIRMED"] },
       ride: { status: "PUBLISHED", departureAt: { gt: new Date() } },
     }
-    const text = query.q
-      ? { contains: query.q, mode: "insensitive" as const }
-      : undefined
+    const text = query.q ? textContains(query.q) : undefined
     const where: Prisma.BookingWhereInput = {
       status: query.status,
       seats: { gte: query.minSeats },

@@ -1,3 +1,4 @@
+import { escapeLike } from "../common/search.js"
 import {
   BadRequestException,
   Inject,
@@ -134,7 +135,7 @@ export class PublicSearchService {
     if (query.smokingAllowed !== undefined)
       conditions.push(Prisma.sql`r."smokingAllowed" = ${query.smokingAllowed}`)
     if (query.q) {
-      const text = `%${query.q}%`
+      const text = `%${escapeLike(query.q)}%`
       conditions.push(
         Prisma.sql`(r."conditions" ILIKE ${text} OR o."name" ILIKE ${text} OR o."address" ILIKE ${text} OR od."name" ILIKE ${text} OR oc."name" ILIKE ${text} OR d."name" ILIKE ${text} OR d."address" ILIKE ${text} OR dd."name" ILIKE ${text} OR dc."name" ILIKE ${text})`
       )

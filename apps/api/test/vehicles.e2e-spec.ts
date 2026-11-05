@@ -120,6 +120,21 @@ describe("Свои автомобили (HTTP + PostgreSQL)", () => {
     expect((await list().expect(200)).body.items).toEqual([result.body])
   })
 
+  it("ищет проценты, подчёркивания и обратную косую черту буквально в тексте и фильтрах", async () => {
+    await create(data()).expect(201)
+    const marker = `Тест%_${String.fromCharCode(92)}серия`
+    const special = await create(
+      data({ make: marker, model: marker, color: marker })
+    ).expect(201)
+    for (const field of ["q", "make", "model", "color"]) {
+      for (const value of ["%", "_", String.fromCharCode(92), marker]) {
+        const result = await list({ [field]: value }).expect(200)
+        expect(result.body.total).toBe(1)
+        expect(result.body.items[0].id).toBe(special.body.id)
+      }
+    }
+  })
+
   it("поддерживает поиск, четыре фильтра с И, диапазон мест и пагинацию только своих автомобилей", async () => {
     const rio = await create(data()).expect(201)
     await create(

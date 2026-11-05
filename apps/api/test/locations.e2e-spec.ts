@@ -104,6 +104,41 @@ describe("Справочники маршрутов (HTTP + PostgreSQL)", () => 
       .query({ q: prefix, ...query })
   }
 
+  it("трактует специальные символы как текст в справочниках и связанных фильтрах", async () => {
+    const marker = `${prefix}%_${String.fromCharCode(92)}точка`
+    await prisma.location.update({
+      where: { id: l1 },
+      data: { name: marker, address: marker },
+    })
+    try {
+      for (const value of ["%", "_", String.fromCharCode(92), marker]) {
+        const locations = await get("locations", {
+          q: value,
+          districtId: d1,
+        }).expect(200)
+        expect(
+          locations.body.items.map((item: { id: string }) => item.id)
+        ).toEqual([l1])
+        for (const path of ["districts", "campuses"]) {
+          for (const field of ["locationName", "address"]) {
+            const result = await get(path, { [field]: value }).expect(200)
+            expect(
+              result.body.items.map((item: { id: string }) => item.id)
+            ).toEqual([path === "districts" ? d1 : c1])
+          }
+        }
+      }
+    } finally {
+      await prisma.location.update({
+        where: { id: l1 },
+        data: {
+          name: data.locations[0]!.name,
+          address: data.locations[0]!.address,
+        },
+      })
+    }
+  })
+
   it("публично выдаёт районы и корпуса с UUID, включая записи без точек", async () => {
     for (const path of ["districts", "campuses"]) {
       const result = await get(path).expect(200)

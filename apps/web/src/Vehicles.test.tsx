@@ -105,7 +105,7 @@ describe("Экран автомобилей", () => {
     expect(fetchMock.mock.calls[2]![1]?.method).toBe("PATCH")
   })
 
-  it("передаёт поиск и четыре фильтра, отличает пустой результат и сбрасывает условия", async () => {
+  it("передаёт поиск и пять фильтров, отличает пустой результат и сбрасывает условия", async () => {
     start()
     fetchMock
       .mockResolvedValueOnce(response(list()))
@@ -118,6 +118,7 @@ describe("Экран автомобилей", () => {
     await userEvent.type(screen.getByLabelText("Модель — фильтр"), "Rio")
     await userEvent.type(screen.getByLabelText("Цвет — фильтр"), "Синий")
     await userEvent.type(screen.getByLabelText("Минимум мест"), "4")
+    await userEvent.type(screen.getByLabelText("Максимум мест"), "6")
     await userEvent.click(screen.getByRole("button", { name: "Найти" }))
     expect(
       await screen.findByText("Нет автомобилей по этим условиям")
@@ -131,6 +132,7 @@ describe("Экран автомобилей", () => {
       model: "Rio",
       color: "Синий",
       minSeats: "4",
+      maxSeats: "6",
     })
     await userEvent.click(
       screen.getByRole("button", { name: "Сбросить фильтры" })
@@ -155,6 +157,52 @@ describe("Экран автомобилей", () => {
     expect(
       screen.getByRole("button", { name: "Далее" }).hasAttribute("disabled")
     ).toBe(true)
+  })
+
+  it("проверяет диапазон мест без запроса и повторно применяет те же условия", async () => {
+    start()
+    fetchMock.mockImplementation(async () => response(list()))
+    render(<App />)
+    await screen.findByText("A123BC196")
+    await userEvent.type(screen.getByLabelText("Минимум мест"), "5")
+    await userEvent.type(screen.getByLabelText("Максимум мест"), "3")
+    await userEvent.click(screen.getByRole("button", { name: "Найти" }))
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Минимум мест не может"
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await userEvent.clear(screen.getByLabelText("Минимум мест"))
+    await userEvent.type(screen.getByLabelText("Минимум мест"), "2")
+    await userEvent.click(screen.getByRole("button", { name: "Найти" }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    await screen.findByText("A123BC196")
+    await userEvent.click(screen.getByRole("button", { name: "Найти" }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4))
+    expect(fetchMock.mock.calls[3]![0]).toBe(fetchMock.mock.calls[2]![0])
+  })
+
+  it("возвращается на существующую страницу после сокращения выдачи, сохраняя поиск", async () => {
+    start()
+    fetchMock
+      .mockResolvedValueOnce(response(list()))
+      .mockResolvedValueOnce(response(list([car], 11)))
+      .mockResolvedValueOnce(response(list([car], 11, 2)))
+      .mockResolvedValueOnce(response(list([], 1, 2)))
+      .mockResolvedValueOnce(response(list()))
+    render(<App />)
+    await screen.findByText("A123BC196")
+    await userEvent.type(screen.getByLabelText("Поиск"), "Kia")
+    await userEvent.click(screen.getByRole("button", { name: "Найти" }))
+    await userEvent.click(await screen.findByRole("button", { name: "Далее" }))
+    await screen.findByText("Страница 2 из 2")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Обновить список" })
+    )
+    await screen.findByText("Страница 1 из 1")
+    const url = new URL(String(fetchMock.mock.calls[5]![0]), "http://localhost")
+    expect(url.searchParams.get("page")).toBe("1")
+    expect(url.searchParams.get("q")).toBe("Kia")
+    expect(screen.queryByText("Нет автомобилей по этим условиям")).toBeNull()
   })
 
   it("позволяет повторить загрузку после ошибки", async () => {

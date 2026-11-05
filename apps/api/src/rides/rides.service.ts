@@ -1,3 +1,4 @@
+import { textContains } from "../common/search.js"
 import { lockActiveUser } from "../auth/active-user.js"
 import {
   BadRequestException,
@@ -90,9 +91,7 @@ export class RidesService {
       (from && to && from > to)
     )
       throw new BadRequestException("Неверный диапазон времени отправления")
-    const text = query.q
-      ? { contains: query.q, mode: "insensitive" as const }
-      : undefined
+    const text = query.q ? textContains(query.q) : undefined
     const where: Prisma.RideWhereInput = {
       driverId: userId,
       status: query.status,

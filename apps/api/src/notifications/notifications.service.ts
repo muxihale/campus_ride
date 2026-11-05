@@ -1,3 +1,4 @@
+import { textContains } from "../common/search.js"
 import {
   BadRequestException,
   HttpException,
@@ -35,9 +36,7 @@ export class NotificationsService {
       to = query.dateTo ? new Date(query.dateTo) : undefined
     if (from && to && from > to)
       throw new BadRequestException("Начало диапазона позже конца")
-    const text = query.q
-      ? { contains: query.q, mode: "insensitive" as const }
-      : undefined
+    const text = query.q ? textContains(query.q) : undefined
     const where: Prisma.NotificationWhereInput = {
       userId,
       kind: query.kind,
