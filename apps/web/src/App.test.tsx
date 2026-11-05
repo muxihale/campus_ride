@@ -17,14 +17,24 @@ function response(body: unknown, status = 200) {
     headers: { "Content-Type": "application/json" },
   })
 }
+function stubFetch() {
+  vi.stubGlobal(
+    "fetch",
+    async (url: RequestInfo | URL, options?: RequestInit) =>
+      String(url).startsWith("/api/me/bookings?")
+        ? response({ items: [], total: 0, page: 1, pageSize: 1 })
+        : fetchMock(url, options)
+  )
+}
 function guest() {
   fetchMock.mockResolvedValueOnce(response({ message: "Требуется вход" }, 401))
-  vi.stubGlobal("fetch", fetchMock)
+  stubFetch()
 }
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
   fetchMock.mockReset()
+  window.history.replaceState(null, "", "/")
 })
 
 describe("Авторизация в интерфейсе", () => {
@@ -32,7 +42,7 @@ describe("Авторизация в интерфейсе", () => {
     fetchMock
       .mockResolvedValueOnce(response(user))
       .mockResolvedValueOnce(response(null, 204))
-    vi.stubGlobal("fetch", fetchMock)
+    stubFetch()
     render(<App />)
     expect(await screen.findByText("Анна Соколова")).toBeTruthy()
     expect(screen.getByText("Пассажир")).toBeTruthy()
@@ -91,7 +101,7 @@ describe("Авторизация в интерфейсе", () => {
     fetchMock
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
       .mockResolvedValueOnce(response(user))
-    vi.stubGlobal("fetch", fetchMock)
+    stubFetch()
     render(<App />)
     await screen.findByRole("alert")
     expect(screen.queryByLabelText("Пароль")).toBeNull()
@@ -103,7 +113,7 @@ describe("Авторизация в интерфейсе", () => {
     fetchMock
       .mockResolvedValueOnce(response(user))
       .mockRejectedValueOnce(new TypeError("Offline"))
-    vi.stubGlobal("fetch", fetchMock)
+    stubFetch()
     render(<App />)
     await screen.findByText("Анна Соколова")
     await userEvent.click(screen.getByRole("button", { name: "Выйти" }))

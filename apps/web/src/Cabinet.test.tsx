@@ -18,6 +18,33 @@ function response(data: unknown, status = 200) {
 }
 function start(path = "profile", roles = profile.roles) {
   window.history.replaceState(null, "", `/#/${path}`)
+  fetchMock.mockImplementation(async (url) => {
+    if (String(url).startsWith("/api/me/bookings?"))
+      return response({ items: [], total: 0, page: 1, pageSize: 1 })
+    if (url === "/api/me/driver-statistics")
+      return response({
+        dateFrom: null,
+        dateTo: null,
+        periodBasis: "departureAt",
+        isDemo: true,
+        currency: "RUB",
+        ridesTotal: 0,
+        draftRides: 0,
+        publishedRides: 0,
+        inProgressRides: 0,
+        completedRides: 0,
+        cancelledRides: 0,
+        completedBookings: 0,
+        passengersTransported: 0,
+        seatsTransported: 0,
+        cancelledBookings: 0,
+        rejectedBookings: 0,
+        demoReceiptsKopecks: "0",
+        demoCompletedRevenueKopecks: "0",
+        demoRefundsKopecks: "0",
+      })
+    throw new Error(`Unexpected ${url}`)
+  })
   fetchMock.mockResolvedValueOnce(response({ ...profile, roles }))
   vi.stubGlobal("fetch", fetchMock)
 }
@@ -78,7 +105,7 @@ describe("Кабинеты и профиль", () => {
     expect(
       screen.getByRole("link", { name: "Открыть заявки пассажиров" })
     ).toBeTruthy()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
   })
 
   it("скрывает чужие разделы и не открывает их по прямой ссылке", async () => {

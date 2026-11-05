@@ -1,3 +1,4 @@
+import { CabinetHome } from "./CabinetHome"
 import { ActivityScreen } from "./Activity"
 import { AdminActivityScreen } from "./AdminActivity"
 import { AdminReviewsScreen } from "./AdminReviews"
@@ -24,22 +25,16 @@ const destinations = [
     path: "passenger",
     label: "Кабинет пассажира",
     role: "PASSENGER",
-    description:
-      "Предстоящие поездки и история доступны в разделе «Мои заявки».",
   },
   {
     path: "driver",
     label: "Кабинет водителя",
     role: "DRIVER",
-    description:
-      "Создавайте и публикуйте поездки. Автомобили и профиль доступны в меню.",
   },
   {
     path: "admin",
     label: "Администрирование",
     role: "ADMIN",
-    description:
-      "Здесь появятся управление пользователями, поездками и модерация отзывов.",
   },
 ] as const
 
@@ -111,8 +106,7 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
         <AdminReviewsScreen onExpired={onExpired} />
       ) : current === "admin/activity" && user.roles.includes("ADMIN") ? (
         <AdminActivityScreen onExpired={onExpired} />
-      ) : (current === "admin" || current === "admin/users") &&
-        user.roles.includes("ADMIN") ? (
+      ) : current === "admin/users" && user.roles.includes("ADMIN") ? (
         <AdminUsersScreen userId={user.id} onExpired={onExpired} />
       ) : current === "reviews" ? (
         <ReviewsScreen userId={user.id} onExpired={onExpired} />
@@ -143,58 +137,11 @@ export function Cabinet({ user, onSaved, onExpired }: Props) {
           onExpired={onExpired}
         />
       ) : destination ? (
-        <section className="rounded-2xl border bg-card p-6 sm:p-8">
-          <p className="text-sm text-muted-foreground">CampusRide · УрФУ</p>
-          <h1 className="mt-2 text-2xl font-semibold">{destination.label}</h1>
-          <p className="mt-5 max-w-xl leading-relaxed text-muted-foreground">
-            {destination.description}
-          </p>
-          {destination.path === "driver" ? (
-            <div className="mt-6 space-y-4 rounded-xl border p-5">
-              <a
-                href="#/rides"
-                className="block text-sm font-medium underline underline-offset-4"
-              >
-                Открыть мои поездки
-              </a>
-              <a
-                href="#/rides/new"
-                className="block text-sm font-medium underline underline-offset-4"
-              >
-                Новая поездка
-              </a>
-              <a
-                href="#/ride-bookings"
-                className="block text-sm font-medium underline underline-offset-4"
-              >
-                Открыть заявки пассажиров
-              </a>
-              <p className="text-sm text-muted-foreground">
-                Статистика появится позже.
-              </p>
-            </div>
-          ) : destination.path === "passenger" ? (
-            <a
-              href="#/bookings"
-              className="mt-6 inline-block font-medium underline underline-offset-4"
-            >
-              Открыть мои заявки
-            </a>
-          ) : (
-            <div className="mt-6 rounded-xl border border-dashed p-5">
-              <p className="text-sm font-medium">Раздел в разработке</p>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Уже сейчас вы можете заполнить контактные данные в профиле.
-              </p>
-              <a
-                className="mt-4 inline-block text-sm font-medium underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-ring"
-                href="#/profile"
-              >
-                Заполнить профиль
-              </a>
-            </div>
-          )}
-        </section>
+        <CabinetHome
+          key={destination.path}
+          role={destination.path}
+          onExpired={onExpired}
+        />
       ) : (
         <section className="rounded-2xl border p-6">
           <h1 className="text-2xl font-semibold">Раздел недоступен</h1>
