@@ -1,3 +1,5 @@
+import { DriverStatisticsController } from "./driver-statistics.controller.js"
+import { DriverStatisticsService } from "./driver-statistics.service.js"
 import { RideCompletionController } from "./ride-completion.controller.js"
 import { RideCompletionService } from "./ride-completion.service.js"
 import { RideStartController } from "./ride-start.controller.js"
@@ -18,6 +20,7 @@ import { RidesService } from "./rides.service.js"
   imports: [AuthModule, PrismaModule],
   controllers: [
     RidesController,
+    DriverStatisticsController,
     OwnRidesController,
     PublicSearchController,
     RideCancellationController,
@@ -26,6 +29,7 @@ import { RidesService } from "./rides.service.js"
   ],
   providers: [
     RidesService,
+    DriverStatisticsService,
     PublicSearchService,
     RideCancellationService,
     RideStartService,
