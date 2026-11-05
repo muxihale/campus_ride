@@ -1,3 +1,4 @@
+import { ActivityModule } from "./activity/activity.module.js"
 import { AdminModule } from "./admin/admin.module.js"
 import { ReviewsModule } from "./reviews/reviews.module.js"
 import { NotificationsModule } from "./notifications/notifications.module.js"
@@ -39,6 +40,7 @@ import { AuthModule } from "./auth/auth.module.js"
     NotificationsModule,
     ReviewsModule,
     AdminModule,
+    ActivityModule,
   ],
   controllers: [HealthController],
 })

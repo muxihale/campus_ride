@@ -3104,6 +3104,23 @@ describe("Создание заявки и решения водителя (HTTP
         where: { resourceId: { in: ids }, action: "review.created" },
       })
     ).toBe(2)
+    const passengerActivity = await request(app.getHttpServer())
+      .get(
+        `/api/me/activity?action=review.created&resourceId=${passengerReview.body.id}`
+      )
+      .set("Cookie", accounts[1]!.cookie)
+      .expect(200)
+    expect(passengerActivity.body.items).toEqual([
+      expect.objectContaining({
+        action: "review.created",
+        resourceId: passengerReview.body.id,
+      }),
+    ])
+    const driverActivity = await request(app.getHttpServer())
+      .get(`/api/me/activity?action=ride.completed&resourceId=${rideId}`)
+      .set("Cookie", accounts[0]!.cookie)
+      .expect(200)
+    expect(driverActivity.body.total).toBe(1)
   })
   const review = (
     id: string,

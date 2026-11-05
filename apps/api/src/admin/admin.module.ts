@@ -1,3 +1,4 @@
+import { ActivityModule } from "../activity/activity.module.js"
 import {
   AdminActivityController,
   AdminActivityService,
@@ -13,7 +14,7 @@ import { PrismaModule } from "../prisma/prisma.module.js"
 import { AdminUsersController } from "./admin-users.controller.js"
 import { AdminUsersService } from "./admin-users.service.js"
 @Module({
-  imports: [AuthModule, PrismaModule],
+  imports: [AuthModule, PrismaModule, ActivityModule],
   controllers: [
     AdminUsersController,
     UserStatusController,
