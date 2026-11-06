@@ -48,6 +48,7 @@ bun install --frozen-lockfile
 bun run db:up
 bun run db:generate
 bun run db:deploy
+bun run db:seed
 bun run dev
 ```
 
@@ -60,7 +61,7 @@ bun run dev
 - Swagger: <http://localhost:3001/api/docs>.
 - OpenAPI JSON: <http://localhost:3001/api/docs-json>.
 
-На главной странице кнопка «Проверить подключение» отправляет `GET /api/health`. Запрос виден в DevTools → Network. Кнопка «Документация API» открывает Swagger через тот же прокси.
+Готовность API проверяется по `/api/health`, подключение к БД — по `/api/health/ready`. Запросы поиска, входа и бронирования видны в DevTools → Network. Swagger доступен через тот же прокси по `/api/docs`.
 
 ### Если PostgreSQL пока недоступен
 
@@ -117,9 +118,12 @@ bun run dev
 ```sh
 cp .env.example .env
 docker compose up --build -d
+docker compose exec -T api bun run db:seed
 ```
 
 Compose поднимает PostgreSQL, применяет миграции при запуске API, ждёт готовности API и запускает собранный фронтенд. Адреса остаются теми же. Используется Vite preview для учебной локальной демонстрации; промышленное развёртывание потребует отдельной конфигурации.
+
+Seed создаёт три демо-аккаунта и справочники маршрутов, сохраняя существующие записи. Поездки водитель создаёт через интерфейс. Для локального запуска также необходим шаг `bun run db:seed`, указанный выше. Результаты проверки чистой установки: [06.1](docs/clean-start.md).
 
 ```sh
 docker compose logs -f api web
