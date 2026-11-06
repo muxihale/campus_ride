@@ -320,6 +320,50 @@ describe("Создание заявки и решения водителя (HTTP
       )._sum.seats
     ).toBe(2)
   })
+  it("последнее место: один победитель гонки, один возврат и повтор проигравшего после освобождения", async () => {
+    await prisma.ride.update({ where: { id: rideId }, data: { seatsTotal: 1 } })
+    const bodies = [1, 2].map(() => ({ seats: 1, requestKey: randomUUID() }))
+    const results = await Promise.all(
+      bodies.map((body, index) => send(body, index + 1))
+    )
+    expect(results.map((result) => result.status).sort()).toEqual([201, 409])
+    const winner = results.findIndex((result) => result.status === 201)
+    const loser = 1 - winner
+    const id = results[winner]!.body.id as string
+    await decide(id).expect(200)
+    await send(bodies[loser], loser + 1).expect(409)
+    const cancelled = await Promise.all([
+      cancel(id, {}, winner + 1),
+      cancel(id, {}, winner + 1),
+    ])
+    expect(cancelled.map((result) => result.status)).toEqual([200, 200])
+    expect(cancelled[0]!.body.payment).toMatchObject({
+      status: "REFUNDED",
+      amountKopecks: 15015,
+    })
+    const retried = await send(bodies[loser], loser + 1).expect(201)
+    const repeated = await send(bodies[loser], loser + 1).expect(200)
+    expect(repeated.body.id).toBe(retried.body.id)
+    expect(
+      await prisma.booking.count({
+        where: { rideId, status: { in: ["PENDING", "CONFIRMED"] } },
+      })
+    ).toBe(1)
+    expect(
+      await prisma.payment.count({
+        where: { booking: { rideId }, status: "REFUNDED" },
+      })
+    ).toBe(1)
+    expect(
+      await prisma.activityLog.count({
+        where: {
+          action: "payment.refunded",
+          resourceId: cancelled[0]!.body.payment.id,
+        },
+      })
+    ).toBe(1)
+  })
+
   it("не допускает две активные заявки одного пассажира с разными ключами", async () => {
     const results = await Promise.all([send(), send()])
     expect(results.map((r) => r.status).sort((a, b) => a - b)).toEqual([
