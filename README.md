@@ -30,7 +30,6 @@
 - [Модель БД и ER-диаграмма](docs/database.md), [исходник draw.io](docs/database.drawio).
 - [Контракт реализованного API](docs/api.md).
 - [Демо-данные справочников и источники адресов](docs/demo-data.md).
-- [План до защиты](docs/plan.md).
 
 ## Стек
 
