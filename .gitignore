@@ -38,3 +38,6 @@ apps/api/src/generated/
 
 # Tests
 coverage/
+
+# Locally downloaded OS packages
+*.deb
