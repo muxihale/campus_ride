@@ -13,6 +13,10 @@ import {
 type Reference = { id: string; name: string }
 const inputClass =
   "mt-2 h-11 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-base outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50"
+function maskTime(raw: string) {
+  const digits = raw.replace(/\D/g, "").slice(0, 4)
+  return digits.length <= 2 ? digits : `${digits.slice(0, 2)}:${digits.slice(2)}`
+}
 export function SearchScreen({ query }: { query: string }) {
   const [initial] = useState(() => readSearch(query))
   const [values, setValues] = useState<SearchFilters>(initial.values)
@@ -168,18 +172,28 @@ export function SearchScreen({ query }: { query: string }) {
             <label className="block text-sm font-medium">
               Отправление с
               <input
-                type="time"
+                type="text"
+                inputMode="numeric"
+                placeholder="ЧЧ:ММ"
+                maxLength={5}
                 value={values.timeFrom}
-                onChange={(event) => update("timeFrom", event.target.value)}
+                onChange={(event) =>
+                  update("timeFrom", maskTime(event.target.value))
+                }
                 className={inputClass}
               />
             </label>
             <label className="block text-sm font-medium">
               Отправление до
               <input
-                type="time"
+                type="text"
+                inputMode="numeric"
+                placeholder="ЧЧ:ММ"
+                maxLength={5}
                 value={values.timeTo}
-                onChange={(event) => update("timeTo", event.target.value)}
+                onChange={(event) =>
+                  update("timeTo", maskTime(event.target.value))
+                }
                 className={inputClass}
               />
             </label>

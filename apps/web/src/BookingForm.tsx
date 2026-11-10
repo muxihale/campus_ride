@@ -19,6 +19,7 @@ export function BookingForm({
   user,
   restoring = false,
   returnTo,
+  initialSeats = null,
   onExpired,
   onSeats,
 }: {
@@ -26,10 +27,18 @@ export function BookingForm({
   user: User | null
   restoring?: boolean
   returnTo: string
+  initialSeats?: number | null
   onExpired?: () => void
   onSeats: (seats: number) => void
 }) {
-  const [seats, setSeats] = useState("1")
+  const [seats, setSeats] = useState(() =>
+    String(
+      Math.max(
+        1,
+        Math.min(initialSeats ?? 1, Math.min(8, ride.availableSeats) || 1)
+      )
+    )
+  )
   const [pending, setPending] = useState(false)
   const [error, setError] = useState("")
   const [booking, setBooking] = useState<Booking | null>(null)

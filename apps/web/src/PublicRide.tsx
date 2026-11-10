@@ -15,6 +15,12 @@ export type PublicRideDetail = PublicRide & {
   }
   vehicle: PublicRide["vehicle"] & { passengerSeats: number }
 }
+export function searchedSeats(query: string): number | null {
+  const search = new URLSearchParams(query).get("search") ?? ""
+  const value = search ? new URLSearchParams(search).get("minSeats") : null
+  const seats = Number(value)
+  return Number.isInteger(seats) && seats >= 1 && seats <= 8 ? seats : null
+}
 export function searchBackLink(query: string) {
   const search = new URLSearchParams(query).get("search") ?? ""
   return !search || readSearch(search).error
@@ -129,6 +135,7 @@ export function PublicRideScreen({
               ride={ride}
               user={user}
               restoring={restoring}
+              initialSeats={searchedSeats(query)}
               onExpired={onExpired}
               returnTo={`#/ride/${id}${query ? `?${query}` : ""}`}
               onSeats={(availableSeats) =>

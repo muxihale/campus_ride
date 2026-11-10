@@ -60,25 +60,26 @@ try {
     ["Основная поездка", "08:30"],
     ["Отмена и возврат", "09:00"],
   ]) {
-    const marker = `Защита CampusRide ${date}: ${scenario}`
-    const existing = (
-      await api(`me/rides?q=${encodeURIComponent(marker)}&pageSize=100`)
-    ).items
-    let ride = existing.find((item) =>
-      ["PUBLISHED", "DRAFT"].includes(item.status)
+    const departureAt = `${date}T${time}:00+05:00`
+    const target = new Date(departureAt).toISOString()
+    const existing = (await api("me/rides?pageSize=100")).items
+    let ride = existing.find(
+      (item) =>
+        ["PUBLISHED", "DRAFT"].includes(item.status) &&
+        new Date(item.departureAt).toISOString() === target
     )
     if (!ride)
       ride = await api("rides", {
         vehicleId: vehicle.id,
         originId: origin.id,
         destinationId: destination.id,
-        departureAt: `${date}T${time}:00+05:00`,
+        departureAt,
         seatsTotal: 3,
         priceKopecks: 15000,
         musicAllowed: true,
         luggageAllowed: true,
         smokingAllowed: false,
-        conditions: `${marker}. Встречаемся у выхода метро за 5 минут. Можно с рюкзаком.`,
+        conditions: "Встречаемся у выхода метро за 5 минут.",
       })
     if (ride.status === "DRAFT")
       ride = await api(`rides/${ride.id}/publish`, {})

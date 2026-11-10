@@ -75,15 +75,25 @@ export function App() {
     setNotice("")
     try {
       setUser(await authRequest<User>(mode, body))
+      const current = window.location.hash
       const target = new URLSearchParams(
-        window.location.hash.split("?").slice(1).join("?")
+        current.split("?").slice(1).join("?")
       ).get("returnTo")
       if (
-        window.location.hash.startsWith("#/login?") &&
+        current.startsWith("#/login?") &&
         target &&
         /^#\/ride\/[a-f0-9-]+(?:\?|$)/i.test(target)
       )
-        window.location.assign(target)
+        window.location.hash = target
+      else if (
+        !current ||
+        current === "#" ||
+        current === "#/login" ||
+        current.startsWith("#/login?") ||
+        current === "#/register" ||
+        current.startsWith("#/register?")
+      )
+        window.location.hash = "#/profile"
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось войти")
     } finally {
@@ -99,6 +109,13 @@ export function App() {
       setUser(null)
       setMode("login")
       setNotice("Вы вышли из аккаунта.")
+      const current = window.location.hash
+      const returnTo = /^#\/ride\/[a-f0-9-]+(?:\?|$)/i.test(current)
+        ? current
+        : ""
+      window.location.hash = returnTo
+        ? `#/login?returnTo=${encodeURIComponent(returnTo)}`
+        : "#/login"
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось выйти")
     } finally {
@@ -203,6 +220,7 @@ export function App() {
       ) : user ? (
         <main id="main-content" tabIndex={-1} className="flex-1">
           <Cabinet
+            key={user.id}
             user={user}
             onSaved={profileSaved}
             onExpired={sessionExpired}

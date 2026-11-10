@@ -2,7 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, expect, it, vi } from "vitest"
 import { SearchResults, type PublicRide } from "./SearchResults"
-import { searchBackLink } from "./PublicRide"
+import { searchBackLink, searchedSeats } from "./PublicRide"
 import { App } from "./App"
 const ride: PublicRide = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -111,6 +111,15 @@ it("показывает бесплатную поездку и ограничи
 })
 it("не восстанавливает некорректные параметры возврата", () => {
   expect(searchBackLink("search=unknown%3Dvalue")).toBe("#/search")
+})
+
+it("переносит число мест из поиска в бронирование", () => {
+  expect(searchedSeats(`search=${encodeURIComponent("minSeats=2&page=1")}`)).toBe(2)
+  expect(searchedSeats(`search=${encodeURIComponent("direction=TO_CAMPUS")}`)).toBe(
+    null
+  )
+  expect(searchedSeats(`search=${encodeURIComponent("minSeats=9")}`)).toBe(null)
+  expect(searchedSeats("")).toBe(null)
 })
 
 it("анонимный поиск получает карточки из API и сохраняет состояние после перехода туда и обратно", async () => {

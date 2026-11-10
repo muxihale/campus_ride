@@ -66,6 +66,46 @@ describe("Авторизация в интерфейсе", () => {
     expect(fetchMock.mock.calls[1]![0]).toBe("/api/auth/logout")
   })
 
+  it("после входа не остаётся на маршруте предыдущего пользователя", async () => {
+    window.location.hash = "#/reviews"
+    const driver = {
+      ...user,
+      id: "driver-1",
+      email: "driver@campusride.test",
+      fullName: "Михаил Кузнецов",
+      roles: ["PASSENGER", "DRIVER"],
+    }
+    fetchMock.mockImplementation(async (input) => {
+      const path = String(input)
+      if (path === "/api/auth/me") return response(user)
+      if (path === "/api/auth/logout") return response(null, 204)
+      if (path === "/api/auth/login") return response(driver)
+      if (path.includes("/ratings"))
+        return response({
+          driver: { average: null, count: 0 },
+          passenger: { average: null, count: 0 },
+        })
+      return response({ items: [], total: 0, page: 1, pageSize: 10 })
+    })
+    stubFetch()
+    render(<App />)
+    expect(await screen.findByText("Анна Соколова")).toBeTruthy()
+    await userEvent.click(screen.getByRole("button", { name: "Выйти" }))
+    await screen.findByRole("heading", { name: "С возвращением" })
+    expect(window.location.hash).toBe("#/login")
+    await userEvent.type(
+      screen.getByLabelText("Email"),
+      "driver@campusride.test"
+    )
+    await userEvent.type(
+      screen.getByLabelText("Пароль"),
+      "CampusRide-demo-2026"
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Войти" }))
+    await waitFor(() => expect(window.location.hash).toBe("#/profile"))
+    expect(screen.queryByText("Раздел недоступен")).toBeNull()
+  })
+
   it("регистрирует пассажира и передаёт пароль без обрезки", async () => {
     guest()
     fetchMock.mockResolvedValueOnce(response(user, 201))

@@ -59,7 +59,7 @@ afterEach(() => {
 })
 async function start(
   user: User | null = passenger,
-  options: { price?: number; onExpired?: () => void } = {}
+  options: { price?: number; onExpired?: () => void; query?: string } = {}
 ) {
   const fetchMock = vi
     .fn<typeof fetch>()
@@ -70,7 +70,7 @@ async function start(
   render(
     <PublicRideScreen
       id={id}
-      query=""
+      query={options.query ?? ""}
       user={user}
       onExpired={options.onExpired}
     />
@@ -78,6 +78,15 @@ async function start(
   await screen.findByRole("heading", { name: "Уралмаш → УрФУ" })
   return fetchMock
 }
+it("подставляет число мест из параметров поиска", async () => {
+  await start(passenger, {
+    query: `search=${encodeURIComponent("minSeats=2&page=1")}`,
+  })
+  expect(
+    (screen.getByLabelText("Количество мест") as HTMLSelectElement).value
+  ).toBe("2")
+  expect(screen.getByText("Итого: 241,00 ₽")).toBeTruthy()
+})
 it("выбирает места, считает итог, отправляет только seats и requestKey, обновляет остаток", async () => {
   const fetchMock = await start()
   await userEvent.selectOptions(screen.getByLabelText("Количество мест"), "2")
